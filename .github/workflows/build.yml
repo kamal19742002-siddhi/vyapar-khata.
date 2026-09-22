@@ -13,11 +13,13 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Bootstrap Android Project
         run: |
           mkdir -p app/src/main/java/com/vyapar/khatabook/free
           mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/mipmap-hdpi
 
           cat << 'EOF' > settings.gradle
           pluginManagement {
@@ -80,7 +82,6 @@ jobs:
 
           dependencies {
               implementation 'androidx.appcompat:appcompat:1.6.1'
-              implementation 'com.google.android.material:material:1.11.0'
           }
           EOF
 
@@ -142,13 +143,11 @@ jobs:
             -keypass android \
             -dname "CN=VyaparKhata, OU=App, O=Vyapar, L=City, S=State, C=IN"
 
-      - name: Setup Gradle Wrapper
-        run: |
-          gradle wrapper --gradle-version 8.5
-          chmod +x ./gradlew
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
 
       - name: Build Android App Bundle (AAB)
-        run: ./gradlew :app:bundleRelease
+        run: gradle :app:bundleRelease
 
       - name: Upload AAB Artifact
         uses: actions/upload-artifact@v4

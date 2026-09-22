@@ -7,6 +7,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -16,25 +21,75 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.5'
-
-      - name: Bootstrap Android Project
+      - name: Create Vyapar Khata Project
         run: |
-          mkdir -p app/src/main/java/com/vyapar/khatabook/free
-          mkdir -p app/src/main/res/values
+          npx create-expo-app@latest vyapar-khata --template blank --no-install
+          cd vyapar-khata
+          
+          # Configure App Identity
+          node -e "
+            const fs = require('fs');
+            const app = JSON.parse(fs.readFileSync('app.json'));
+            app.expo.name = 'Vyapar Khata Book';
+            app.expo.slug = 'vyapar-khata';
+            app.expo.version = '1.0.0';
+            app.expo.android = {
+              package: 'com.vyapar.khatabook.free',
+              versionCode: 1
+            };
+            fs.writeFileSync('app.json', JSON.stringify(app, null, 2));
+          "
+          
+          npm install
+          npx expo prebuild --platform android --no-install
 
-          cat << 'EOF' > settings.gradle
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-          dependencyResolutionManagement {
+      - name: Generate Release Keystore
+        run: |
+          cd vyapar-khata/android/app
+          keytool -genkeypair -v \
+            -keystore release.keystore \
+            -alias vyapar-key \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=VyaparKhata, O=Vyapar, C=IN"
+
+      - name: Configure Gradle Signing
+        run: |
+          cd vyapar-khata/android
+          cat << 'EOF' > configure_signing.py
+          with open("app/build.gradle", "r") as f:
+              data = f.read()
+
+          signing_block = """
+                  release {
+                      storeFile file('release.keystore')
+                      storePassword 'android'
+                      keyAlias 'vyapar-key'
+                      keyPassword 'android'
+                  }
+          """
+          data = data.replace("signingConfigs {", "signingConfigs {" + signing_block)
+          data = data.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+
+          with open("app/build.gradle", "w") as f:
+              f.write(data)
+          EOF
+          python3 configure_signing.py
+
+      - name: Build Android App Bundle (.aab)
+        run: |
+          cd vyapar-khata/android
+          chmod +x gradlew
+          ./gradlew bundleRelease --no-daemon
+
+      - name: Upload AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-bundle
+          path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab          dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
                   google()

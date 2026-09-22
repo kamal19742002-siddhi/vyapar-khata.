@@ -18,12 +18,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Create Vyapar Khata Project
         run: |
-          npx create-expo-app@latest vyapar-khata --template blank --no-install
+          npx --yes create-expo-app@latest vyapar-khata --template blank --no-install
           cd vyapar-khata
           
           # Configure App Identity

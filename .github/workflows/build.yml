@@ -16,6 +16,11 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
+
       - name: Bootstrap Android Project
         run: |
           mkdir -p app/src/main/java/com/vyapar/khatabook/free
@@ -131,7 +136,7 @@ jobs:
           }
           EOF
 
-      - name: Generate Release Keystore
+      - name: Generate Keystore
         run: |
           keytool -genkeypair -v \
             -keystore app/release.keystore \
@@ -142,9 +147,6 @@ jobs:
             -storepass android \
             -keypass android \
             -dname "CN=VyaparKhata, OU=App, O=Vyapar, L=City, S=State, C=IN"
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
 
       - name: Build Android App Bundle (AAB)
         run: gradle :app:bundleRelease

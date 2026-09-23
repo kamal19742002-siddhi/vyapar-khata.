@@ -1,44 +1,313 @@
-name: Generate Permanent Keystore
+name: Build Vyapar Khata AAB
 
 on:
   workflow_dispatch:
 
 jobs:
-  create-key:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Generate Keystore & PEM
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Create Vyapar Khata Project
         run: |
-          # 1. Permanent keystore create karein
+          npx --yes create-expo-app@latest vyapar-khata --template blank --no-install
+          cd vyapar-khata
+          
+          # App configuration with Version Code 5
+          node -e "
+            const fs = require('fs');
+            const app = JSON.parse(fs.readFileSync('app.json'));
+            app.expo.name = 'Vyapar Khata Book';
+            app.expo.slug = 'vyapar-khata';
+            app.expo.version = '1.0.4';
+            app.expo.android = {
+              package: 'com.vyapar.khatabook.free',
+              versionCode: 5
+            };
+            fs.writeFileSync('app.json', JSON.stringify(app, null, 2));
+          "
+
+          # Dependencies
+          npm install --no-audit --prefer-offline
+          npm install @react-native-async-storage/async-storage --no-audit
+
+          # Ledger persistent code
+          cat << 'EOF' > App.js
+          import React, { useState, useEffect } from 'react';
+          import {
+            StyleSheet,
+            Text,
+            View,
+            TextInput,
+            TouchableOpacity,
+            FlatList,
+            SafeAreaView,
+            StatusBar,
+            Alert,
+            ActivityIndicator
+          } from 'react-native';
+          import AsyncStorage from '@react-native-async-storage/async-storage';
+
+          const STORAGE_KEY = '@vyapar_khata_customers_v1';
+
+          export default function App() {
+            const [customers, setCustomers] = useState([]);
+            const [name, setName] = useState('');
+            const [amount, setAmount] = useState('');
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+              loadLedgerData();
+            }, []);
+
+            const loadLedgerData = async () => {
+              try {
+                const saved = await AsyncStorage.getItem(STORAGE_KEY);
+                if (saved !== null) {
+                  setCustomers(JSON.parse(saved));
+                } else {
+                  const initialData = [
+                    { id: '1', name: 'Ramesh Kumar', balance: -500 },
+                    { id: '2', name: 'Suresh Patel', balance: 1200 },
+                  ];
+                  setCustomers(initialData);
+                  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(initialData));
+                }
+              } catch (e) {
+                console.error(e);
+              } finally {
+                setLoading(false);
+              }
+            };
+
+            const saveData = async (newData) => {
+              try {
+                setCustomers(newData);
+                await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(newData));
+              } catch (e) {
+                Alert.alert('Error', 'Data save failed');
+              }
+            };
+
+            const addTransaction = (type) => {
+              if (!name.trim() || !amount.trim()) {
+                Alert.alert('Adhura Form', 'Naam aur amount likhein');
+                return;
+              }
+              const amt = parseFloat(amount);
+              if (isNaN(amt) || amt <= 0) {
+                Alert.alert('Galt Amount', 'Sahi amount dalein');
+                return;
+              }
+
+              const change = type === 'jama' ? amt : -amt;
+              const existingIndex = customers.findIndex(
+                c => c.name.toLowerCase() === name.trim().toLowerCase()
+              );
+
+              let updatedList;
+              if (existingIndex > -1) {
+                updatedList = [...customers];
+                updatedList[existingIndex].balance += change;
+              } else {
+                updatedList = [
+                  { id: Date.now().toString(), name: name.trim(), balance: change },
+                  ...customers
+                ];
+              }
+
+              saveData(updatedList);
+              setName('');
+              setAmount('');
+            };
+
+            const deleteCustomer = (id, customerName) => {
+              Alert.alert('Delete', `${customerName} ka account hatayein?`, [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: () => saveData(customers.filter(c => c.id !== id))
+                }
+              ]);
+            };
+
+            const totalBalance = customers.reduce((acc, c) => acc + c.balance, 0);
+
+            if (loading) {
+              return (
+                <View style={styles.loaderContainer}>
+                  <ActivityIndicator size="large" color="#1a237e" />
+                </View>
+              );
+            }
+
+            return (
+              <SafeAreaView style={styles.container}>
+                <StatusBar barStyle="light-content" backgroundColor="#1a237e" />
+                <View style={styles.header}>
+                  <Text style={styles.headerTitle}>व्यापार खाता (Vyapar Khata)</Text>
+                  <Text style={styles.headerSubtitle}>Surakshit Offline Bahi Khata</Text>
+                </View>
+
+                <View style={styles.card}>
+                  <Text style={styles.cardLabel}>Kul Bakaya / Net Balance</Text>
+                  <Text style={[styles.cardValue, { color: totalBalance >= 0 ? '#2e7d32' : '#c62828' }]}>
+                    ₹ {Math.abs(totalBalance)} {totalBalance >= 0 ? '(Lena hai)' : '(Dena hai)'}
+                  </Text>
+                </View>
+
+                <View style={styles.formContainer}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Customer Name"
+                    placeholderTextColor="#777"
+                    value={name}
+                    onChangeText={setName}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Amount (₹)"
+                    placeholderTextColor="#777"
+                    keyboardType="numeric"
+                    value={amount}
+                    onChangeText={setAmount}
+                  />
+                  <View style={styles.buttonRow}>
+                    <TouchableOpacity style={[styles.btn, styles.btnUdhar]} onPress={() => addTransaction('udhar')}>
+                      <Text style={styles.btnText}>- Diya (Udhar)</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.btn, styles.btnJama]} onPress={() => addTransaction('jama')}>
+                      <Text style={styles.btnText}>+ Mila (Jama)</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.listHeader}>
+                  <Text style={styles.listTitle}>Customer Accounts</Text>
+                  <Text style={styles.listSub}>{customers.length} Grahak (Long-press delete)</Text>
+                </View>
+
+                <FlatList
+                  data={customers}
+                  keyExtractor={item => item.id}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onLongPress={() => deleteCustomer(item.id, item.name)}
+                      style={styles.listItem}
+                    >
+                      <View>
+                        <Text style={styles.itemName}>{item.name}</Text>
+                        <Text style={styles.itemDate}>Saved offline</Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={[styles.itemAmount, { color: item.balance >= 0 ? '#2e7d32' : '#c62828' }]}>
+                          ₹ {Math.abs(item.balance)}
+                        </Text>
+                        <Text style={styles.itemType}>
+                          {item.balance >= 0 ? 'Milna hai' : 'Dene hain'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                />
+              </SafeAreaView>
+            );
+          }
+
+          const styles = StyleSheet.create({
+            container: { flex: 1, backgroundColor: '#f4f6f8' },
+            loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+            header: { backgroundColor: '#1a237e', padding: 18, alignItems: 'center' },
+            headerTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+            headerSubtitle: { color: '#c5cae9', fontSize: 13, marginTop: 2 },
+            card: {
+              backgroundColor: '#fff', marginHorizontal: 16, marginTop: 12, padding: 16,
+              borderRadius: 10, elevation: 3, alignItems: 'center'
+            },
+            cardLabel: { color: '#666', fontSize: 13, fontWeight: '600' },
+            cardValue: { fontSize: 24, fontWeight: 'bold', marginTop: 4 },
+            formContainer: { backgroundColor: '#fff', margin: 16, padding: 14, borderRadius: 10, elevation: 3 },
+            input: {
+              backgroundColor: '#f9f9f9', borderWidth: 1, borderColor: '#ddd',
+              borderRadius: 8, padding: 10, fontSize: 15, marginBottom: 10
+            },
+            buttonRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
+            btn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
+            btnUdhar: { backgroundColor: '#d32f2f' },
+            btnJama: { backgroundColor: '#2e7d32' },
+            btnText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+            listHeader: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 18, marginBottom: 6 },
+            listTitle: { fontSize: 15, fontWeight: 'bold', color: '#333' },
+            listSub: { fontSize: 11, color: '#777', alignSelf: 'center' },
+            listItem: {
+              backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 8, padding: 14,
+              borderRadius: 8, flexDirection: 'row', justifyContent: 'space-between', elevation: 1
+            },
+            itemName: { fontSize: 16, fontWeight: '600', color: '#222' },
+            itemDate: { fontSize: 12, color: '#888', marginTop: 2 },
+            itemAmount: { fontSize: 17, fontWeight: 'bold' },
+            itemType: { fontSize: 11, color: '#666', marginTop: 2 }
+          });
+          EOF
+          
+          CI=1 npx expo prebuild --platform android --no-install
+
+      - name: Generate Release Keystore
+        run: |
+          cd vyapar-khata/android/app
           keytool -genkeypair -v \
-            -keystore upload-keystore.jks \
-            -alias upload \
+            -keystore release.keystore \
+            -alias vyapar-key \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
-            -storepass android123 \
-            -keypass android123 \
+            -storepass android \
+            -keypass android \
             -dname "CN=VyaparKhata, O=Vyapar, C=IN"
 
-          # 2. Google ke liye PEM certificate export karein
-          keytool -export -rfc \
-            -alias upload \
-            -file upload_certificate.pem \
-            -keystore upload-keystore.jks \
-            -storepass android123
+      - name: Configure Gradle Signing
+        run: |
+          cd vyapar-khata/android
+          cat << 'EOF' > configure_signing.py
+          with open("app/build.gradle", "r") as f:
+              data = f.read()
 
-          # 3. Base64 format print karein (GitHub Secrets ke liye)
-          echo "=== COPY THIS BASE64 FOR GITHUB SECRETS ==="
-          base64 -w 0 upload-keystore.jks > keystore_base64.txt
-          cat keystore_base64.txt
-          echo ""
-          echo "==========================================="
+          signing_block = """
+                  release {
+                      storeFile file('release.keystore')
+                      storePassword 'android'
+                      keyAlias 'vyapar-key'
+                      keyPassword 'android'
+                  }
+          """
+          data = data.replace("signingConfigs {", "signingConfigs {" + signing_block)
+          data = data.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
 
-      - name: Upload Files as Artifact
+          with open("app/build.gradle", "w") as f:
+              f.write(data)
+          EOF
+          python3 configure_signing.py
+
+      - name: Build Android App Bundle (.aab)
+        run: |
+          cd vyapar-khata/android
+          chmod +x gradlew
+          ./gradlew bundleRelease --no-daemon
+
+      - name: Upload AAB Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: google-play-key-files
-          path: |
-            upload_certificate.pem
-            upload-keystore.jks
-            keystore_base64.txt
+          name: app-release-bundle-v5
+          path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab

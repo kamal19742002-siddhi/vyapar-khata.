@@ -7,6 +7,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -18,15 +21,19 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Create Vyapar Khata Project
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Project and Config
         run: |
           npx --yes create-expo-app@latest vyapar-khata --template blank --no-install
           cd vyapar-khata
 
-          # Version code 12 set karna
+          # app.json sahi tarike se update aur save karna
           node -e "
             const fs = require('fs');
-            const app = JSON.parse(fs.readFileSync('app.json'));
+            const file = 'app.json';
+            const app = JSON.parse(fs.readFileSync(file, 'utf8'));
             app.expo.name = 'Vyapar Khata Book';
             app.expo.slug = 'vyapar-khata';
             app.expo.version = '1.0.7';
@@ -34,7 +41,23 @@ jobs:
               package: 'com.vyapar.khatabook.free',
               versionCode: 12
             };
-            fs.writeFileSync('app.json', JSON.stringify(app, null, 2));
+            fs.writeFileSync(file, JSON.stringify(app, null, 2));
+          "
+
+          npm install
+          npx expo prebuild --platform android
+
+      - name: Build Android App Bundle
+        run: |
+          cd vyapar-khata/android
+          chmod +x gradlew
+          ./gradlew bundleRelease --no-daemon
+
+      - name: Upload AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vyapar-khata-release-aab
+          path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab            fs.writeFileSync('app.json', JSON.stringify(app, null, 2));
           "
 
           # Dependencies Install

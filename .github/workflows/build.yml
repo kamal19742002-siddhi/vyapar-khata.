@@ -23,10 +23,13 @@ jobs:
           npx --yes create-expo-app@latest vyapar-khata --template blank --no-install
           cd vyapar-khata
           
-          # Dependencies install
+          # 1. Base packages install karein
+          npm install
+          
+          # 2. WebView dependency install karein
           npx expo install react-native-webview
           
-          # App.json configuration (versionCode 12)
+          # 3. App.json configuration (versionCode 12)
           node -e "
             const fs = require('fs');
             const app = JSON.parse(fs.readFileSync('app.json'));
@@ -40,7 +43,7 @@ jobs:
             fs.writeFileSync('app.json', JSON.stringify(app, null, 2));
           "
 
-          # App.js with Live CRM WebView
+          # 4. App.js with Live CRM WebView
           cat << 'EOF' > App.js
           import React from 'react';
           import { SafeAreaView, StyleSheet, StatusBar } from 'react-native';
@@ -69,6 +72,7 @@ jobs:
           });
           EOF
 
+          # 5. Native prebuild
           CI=1 npx expo prebuild --platform android --no-install
 
       - name: Generate Release Keystore
@@ -117,4 +121,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-release-bundle-v12
-          path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab     
+          path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab

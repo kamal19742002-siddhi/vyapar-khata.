@@ -23,16 +23,16 @@ jobs:
           npx --yes create-expo-app@latest vyapar-khata --template blank --no-install
           cd vyapar-khata
           
-          # App configuration with Version Code 5
+          # Version Code set to 10
           node -e "
             const fs = require('fs');
             const app = JSON.parse(fs.readFileSync('app.json'));
             app.expo.name = 'Vyapar Khata Book';
             app.expo.slug = 'vyapar-khata';
-            app.expo.version = '1.0.4';
+            app.expo.version = '1.0.5';
             app.expo.android = {
               package: 'com.vyapar.khatabook.free',
-              versionCode: 5
+              versionCode: 10
             };
             fs.writeFileSync('app.json', JSON.stringify(app, null, 2));
           "
@@ -41,7 +41,7 @@ jobs:
           npm install --no-audit --prefer-offline
           npm install @react-native-async-storage/async-storage --no-audit
 
-          # Ledger persistent code
+          # Ledger App Code
           cat << 'EOF' > App.js
           import React, { useState, useEffect } from 'react';
           import {
@@ -309,5 +309,5 @@ jobs:
       - name: Upload AAB Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-bundle-v5
+          name: app-release-bundle-v10
           path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab

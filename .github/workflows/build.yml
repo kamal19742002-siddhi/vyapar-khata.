@@ -19,7 +19,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Create Project and Setup App
+      - name: Create Vyapar Khata App
         run: |
           npx --yes create-expo-app@latest vyapar-khata --template blank --no-install
           cd vyapar-khata
@@ -28,108 +28,193 @@ jobs:
           npx expo install react-native-webview
 
           node -e "
-          const fs = require('fs');
-          const app = JSON.parse(fs.readFileSync('app.json'));
-          app.expo.name = 'Vyapar Khata Book';
-          app.expo.slug = 'vyapar-khata';
-          app.expo.version = '1.0.9';
-          app.expo.android = {
-            package: 'com.vyapar.khatabook.free',
-            versionCode: 14
+          const fs=require('fs');
+          const app=JSON.parse(fs.readFileSync('app.json'));
+          app.expo.name='Vyapar Khata Book';
+          app.expo.slug='vyapar-khata';
+          app.expo.version='1.0.9';
+          app.expo.android={
+            package:'com.vyapar.khatabook.free',
+            versionCode:14
           };
-          fs.writeFileSync('app.json', JSON.stringify(app, null, 2));
+          fs.writeFileSync('app.json',JSON.stringify(app,null,2));
           "
 
-          cat << 'EOF' > App.js
+          cat <<'EOF' > App.js
           import React from 'react';
           import { SafeAreaView, StatusBar, StyleSheet } from 'react-native';
           import { WebView } from 'react-native-webview';
 
-          export default function App() {
-            const html = `
-              <!DOCTYPE html>
-              <html>
-              <head>
-                <meta name="viewport"
-                  content="width=device-width, initial-scale=1.0">
-                <style>
-                  body {
-                    margin: 0;
-                    background: #f5f7fa;
-                    font-family: Arial, sans-serif;
-                  }
+          const html = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+          *{box-sizing:border-box}
+          body{
+            margin:0;
+            font-family:Arial,sans-serif;
+            background:#f4f7fb;
+            color:#172033;
+          }
+          .top{
+            background:linear-gradient(135deg,#1261d8,#063b9d);
+            color:white;
+            padding:25px 18px 28px;
+            border-radius:0 0 25px 25px;
+          }
+          .title{font-size:25px;font-weight:bold}
+          .sub{font-size:14px;margin-top:6px;opacity:.85}
+          .cards{
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:12px;
+            padding:16px;
+            margin-top:-12px;
+          }
+          .card{
+            background:white;
+            border-radius:17px;
+            padding:17px;
+            box-shadow:0 3px 12px #00000012;
+          }
+          .label{font-size:13px;color:#697386}
+          .amount{font-size:21px;font-weight:bold;margin-top:7px}
+          .receive{color:#078447}
+          .pay{color:#d34a4a}
+          .section{
+            padding:5px 16px;
+            font-size:19px;
+            font-weight:bold;
+          }
+          .actions{
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:12px;
+            padding:12px 16px 18px;
+          }
+          button{
+            border:0;
+            padding:16px 8px;
+            border-radius:15px;
+            font-size:15px;
+            font-weight:bold;
+          }
+          .add{background:#1261d8;color:white}
+          .view{background:white;color:#1261d8}
+          .customer{
+            background:white;
+            margin:8px 16px;
+            padding:16px;
+            border-radius:16px;
+            display:flex;
+            justify-content:space-between;
+            box-shadow:0 2px 9px #0000000d;
+          }
+          .name{font-weight:bold;font-size:16px}
+          .phone{font-size:12px;color:#7b8494;margin-top:5px}
+          .bal{font-weight:bold;color:#078447}
+          .bottom{
+            height:65px;
+            background:white;
+            display:flex;
+            justify-content:space-around;
+            align-items:center;
+            margin-top:18px;
+            border-top:1px solid #e6e9ef;
+          }
+          .nav{text-align:center;font-size:12px;color:#647084}
+          .nav.active{color:#1261d8;font-weight:bold}
+          </style>
+          </head>
 
-                  .header {
-                    background: #166534;
-                    color: white;
-                    padding: 24px 18px;
-                    font-size: 25px;
-                    font-weight: bold;
-                  }
+          <body>
 
-                  .card {
-                    background: white;
-                    margin: 20px;
-                    padding: 24px;
-                    border-radius: 16px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,.08);
-                  }
+          <div class="top">
+            <div class="title">Vyapar Khata Book</div>
+            <div class="sub">Manage your business accounts easily</div>
+          </div>
 
-                  h2 {
-                    margin-top: 0;
-                    color: #166534;
-                  }
+          <div class="cards">
+            <div class="card">
+              <div class="label">You will receive</div>
+              <div class="amount receive">₹25,450</div>
+            </div>
 
-                  p {
-                    color: #444;
-                    font-size: 16px;
-                    line-height: 1.5;
-                  }
+            <div class="card">
+              <div class="label">You will pay</div>
+              <div class="amount pay">₹8,750</div>
+            </div>
+          </div>
 
-                  .button {
-                    background: #166534;
-                    color: white;
-                    padding: 15px;
-                    border-radius: 10px;
-                    text-align: center;
-                    font-size: 17px;
-                    margin-top: 20px;
-                  }
-                </style>
-              </head>
+          <div class="section">Quick Actions</div>
 
-              <body>
-                <div class="header">Vyapar Khata Book</div>
+          <div class="actions">
+            <button class="add" onclick="alert('Add Customer')">
+              + Add Customer
+            </button>
 
-                <div class="card">
-                  <h2>Welcome</h2>
-                  <p>
-                    Vyapar Khata Book app is ready for testing.
-                  </p>
+            <button class="view" onclick="alert('New Entry')">
+              + New Entry
+            </button>
 
-                  <p>
-                    Your business khata and customer records
-                    can be managed from this app.
-                  </p>
+            <button class="view" onclick="alert('Customers')">
+              👥 Customers
+            </button>
 
-                  <div class="button">
-                    Vyapar Khata Book
-                  </div>
-                </div>
-              </body>
-              </html>
-            `;
+            <button class="view" onclick="alert('Reports')">
+              📊 Reports
+            </button>
+          </div>
 
-            return (
+          <div class="section">Recent Customers</div>
+
+          <div class="customer">
+            <div>
+              <div class="name">Rahul Traders</div>
+              <div class="phone">98765 43210</div>
+            </div>
+            <div class="bal">₹12,500</div>
+          </div>
+
+          <div class="customer">
+            <div>
+              <div class="name">Amit Enterprises</div>
+              <div class="phone">98765 12345</div>
+            </div>
+            <div class="bal">₹7,950</div>
+          </div>
+
+          <div class="customer">
+            <div>
+              <div class="name">Sharma Store</div>
+              <div class="phone">99887 66554</div>
+            </div>
+            <div class="bal">₹5,000</div>
+          </div>
+
+          <div class="bottom">
+            <div class="nav active">🏠<br>Home</div>
+            <div class="nav">👥<br>Customers</div>
+            <div class="nav">📒<br>Khata</div>
+            <div class="nav">📊<br>Reports</div>
+          </div>
+
+          </body>
+          </html>
+          `;
+
+          export default function App(){
+            return(
               <SafeAreaView style={styles.container}>
                 <StatusBar
                   barStyle="light-content"
-                  backgroundColor="#166534"
+                  backgroundColor="#1261d8"
                 />
-
                 <WebView
-                  source={{ html }}
-                  style={{ flex: 1 }}
+                  source={{html}}
+                  style={{flex:1}}
                   javaScriptEnabled={true}
                   domStorageEnabled={true}
                 />
@@ -137,10 +222,10 @@ jobs:
             );
           }
 
-          const styles = StyleSheet.create({
-            container: {
-              flex: 1,
-              backgroundColor: '#f5f7fa'
+          const styles=StyleSheet.create({
+            container:{
+              flex:1,
+              backgroundColor:'#f4f7fb'
             }
           });
           EOF

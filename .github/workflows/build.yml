@@ -8,52 +8,48 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Setup JDK 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Create Vyapar Khata Project
+      - name: Create App
         run: |
           npx --yes create-expo-app@latest vyapar-khata --template blank --no-install
           cd vyapar-khata
 
           npm install
-
           npx expo install expo-document-picker
           npx expo install @react-native-async-storage/async-storage
-          npx expo install @react-native-picker/picker
 
           node - <<'NODE'
           const fs = require("fs");
 
-          const file = "app.json";
-          const app = JSON.parse(fs.readFileSync(file, "utf8"));
+          const p = "app.json";
+          const app = JSON.parse(fs.readFileSync(p, "utf8"));
 
           app.expo.name = "Vyapar Khata";
           app.expo.slug = "vyapar-khata";
-          app.expo.version = "1.0.28";
+          app.expo.version = "1.0.29";
 
           app.expo.android = {
             package: "com.vyapar.khatabook.free",
-            versionCode: 28
+            versionCode: 29
           };
 
-          fs.writeFileSync(file, JSON.stringify(app, null, 2));
+          fs.writeFileSync(p, JSON.stringify(app, null, 2));
           NODE
 
           cat > App.js <<'APPJS'
-          import React, { useEffect, useState } from "react";
+          import React, {useEffect, useMemo, useState} from "react";
           import {
             Alert,
-            FlatList,
             SafeAreaView,
             ScrollView,
             StatusBar,
@@ -66,267 +62,570 @@ jobs:
 
           import AsyncStorage from "@react-native-async-storage/async-storage";
           import * as DocumentPicker from "expo-document-picker";
-          import { Picker } from "@react-native-picker/picker";
 
-          const STORAGE_KEY = "@vyapar_khata_entries_v1";
+          const STORE = "@vyapar_khata_data_v2";
 
           const today = () => {
             const d = new Date();
-            const day = String(d.getDate()).padStart(2, "0");
-            const month = String(d.getMonth() + 1).padStart(2, "0");
-            const year = d.getFullYear();
-            return `${day}/${month}/${year}`;
+            return (
+              String(d.getDate()).padStart(2, "0") +
+              "/" +
+              String(d.getMonth() + 1).padStart(2, "0") +
+              "/" +
+              d.getFullYear()
+            );
           };
 
           export default function App() {
 
-            const [activeTab, setActiveTab] = useState("Customers");
-            const [entries, setEntries] = useState([]);
+            const [screen, setScreen] = useState("home");
+            const [tab, setTab] = useState("Customers");
+
+            const [customers, setCustomers] = useState([]);
+            const [suppliers, setSuppliers] = useState([]);
+
+            const [selected, setSelected] = useState(null);
 
             const [name, setName] = useState("");
+            const [phone, setPhone] = useState("");
+            const [gst, setGst] = useState("");
+            const [address, setAddress] = useState("");
+            const [email, setEmail] = useState("");
+
             const [invoiceNo, setInvoiceNo] = useState("");
             const [invoiceDate, setInvoiceDate] = useState(today());
             const [amount, setAmount] = useState("");
             const [paymentMode, setPaymentMode] = useState("Cash");
+            const [entryType, setEntryType] = useState("Credit");
             const [attachment, setAttachment] = useState(null);
 
             useEffect(() => {
-              loadEntries();
+              loadData();
             }, []);
 
-            const loadEntries = async () => {
+            const loadData = async () => {
               try {
-                const saved = await AsyncStorage.getItem(STORAGE_KEY);
+                const raw = await AsyncStorage.getItem(STORE);
 
-                if (saved) {
-                  setEntries(JSON.parse(saved));
-                } else {
-                  setEntries([
-                    {
-                      id: "1",
-                      type: "Customers",
-                      name: "Ramesh Kumar",
-                      invoiceNo: "INV-001",
-                      invoiceDate: today(),
-                      amount: 500,
-                      paymentMode: "Credit",
-                      attachment: null,
-                      createdAt: Date.now()
-                    },
-                    {
-                      id: "2",
-                      type: "Customers",
-                      name: "Suresh Patel",
-                      invoiceNo: "INV-002",
-                      invoiceDate: today(),
-                      amount: 1200,
-                      paymentMode: "UPI",
-                      attachment: null,
-                      createdAt: Date.now()
-                    },
-                    {
-                      id: "3",
-                      type: "Suppliers",
-                      name: "ABC Traders",
-                      invoiceNo: "PUR-001",
-                      invoiceDate: today(),
-                      amount: 2500,
-                      paymentMode: "Bank",
-                      attachment: null,
-                      createdAt: Date.now()
-                    }
-                  ]);
+                if (raw) {
+                  const data = JSON.parse(raw);
+                  setCustomers(data.customers || []);
+                  setSuppliers(data.suppliers || []);
                 }
               } catch (e) {
                 console.log(e);
               }
             };
 
-            const saveEntries = async (data) => {
-              try {
-                await AsyncStorage.setItem(
-                  STORAGE_KEY,
-                  JSON.stringify(data)
-                );
-              } catch (e) {
-                console.log(e);
-              }
+            const saveData = async (c, s) => {
+              await AsyncStorage.setItem(
+                STORE,
+                JSON.stringify({
+                  customers: c,
+                  suppliers: s
+                })
+              );
             };
 
-            const chooseAttachment = async () => {
-              try {
-                const result = await DocumentPicker.getDocumentAsync({
-                  type: [
-                    "image/*",
-                    "application/pdf"
-                  ],
-                  copyToCacheDirectory: true
-                });
+            const currentList =
+              tab === "Customers" ? customers : suppliers;
 
-                if (!result.canceled && result.assets?.length > 0) {
-                  setAttachment(result.assets[0]);
-                }
-              } catch (e) {
-                Alert.alert(
-                  "Attachment",
-                  "Unable to select the invoice copy."
-                );
-              }
-            };
-
-            const addEntry = async () => {
-
-              if (!name.trim()) {
-                Alert.alert(
-                  "Missing Information",
-                  "Please enter Customer or Supplier name."
-                );
-                return;
-              }
-
-              if (!amount.trim()) {
-                Alert.alert(
-                  "Missing Information",
-                  "Please enter amount."
-                );
-                return;
-              }
-
-              const numericAmount = Number(amount);
-
-              if (
-                !Number.isFinite(numericAmount) ||
-                numericAmount <= 0
-              ) {
-                Alert.alert(
-                  "Invalid Amount",
-                  "Please enter a valid amount."
-                );
-                return;
-              }
-
-              const newEntry = {
-                id: Date.now().toString(),
-                type: activeTab,
-                name: name.trim(),
-                invoiceNo:
-                  invoiceNo.trim() ||
-                  `${activeTab === "Customers" ? "INV" : "PUR"}-${Date.now()}`,
-                invoiceDate: invoiceDate.trim() || today(),
-                amount: numericAmount,
-                paymentMode,
-                attachment: attachment
-                  ? {
-                      name: attachment.name,
-                      uri: attachment.uri,
-                      mimeType: attachment.mimeType || ""
-                    }
-                  : null,
-                createdAt: Date.now()
-              };
-
-              const updated = [
-                newEntry,
-                ...entries
-              ];
-
-              setEntries(updated);
-              await saveEntries(updated);
-
+            const resetProfile = () => {
               setName("");
+              setPhone("");
+              setGst("");
+              setAddress("");
+              setEmail("");
               setInvoiceNo("");
               setInvoiceDate(today());
               setAmount("");
               setPaymentMode("Cash");
+              setEntryType("Credit");
               setAttachment(null);
+            };
+
+            const addPerson = async () => {
+
+              if (!name.trim()) {
+                Alert.alert("Required", "Please enter name.");
+                return;
+              }
+
+              const person = {
+                id: Date.now().toString(),
+                name: name.trim(),
+                phone: phone.trim(),
+                gst: gst.trim(),
+                address: address.trim(),
+                email: email.trim(),
+                entries: []
+              };
+
+              if (tab === "Customers") {
+                const updated = [person, ...customers];
+                setCustomers(updated);
+                await saveData(updated, suppliers);
+              } else {
+                const updated = [person, ...suppliers];
+                setSuppliers(updated);
+                await saveData(customers, updated);
+              }
+
+              resetProfile();
+              setScreen("home");
 
               Alert.alert(
                 "Saved",
-                `${activeTab === "Customers" ? "Customer" : "Supplier"} entry saved successfully.`
+                `${tab === "Customers" ? "Customer" : "Supplier"} profile saved.`
               );
             };
 
-            const filteredEntries = entries.filter(
-              item => item.type === activeTab
-            );
+            const addTransaction = async () => {
 
-            const customerTotal = entries
-              .filter(item => item.type === "Customers")
-              .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+              if (!selected) return;
 
-            const supplierTotal = entries
-              .filter(item => item.type === "Suppliers")
-              .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+              const value = Number(amount);
 
-            const openEntry = (item) => {
-              Alert.alert(
-                item.name,
-                `Invoice No: ${item.invoiceNo}\n` +
-                `Invoice Date: ${item.invoiceDate}\n` +
-                `Amount: ₹${item.amount}\n` +
-                `Payment Mode: ${item.paymentMode}\n` +
-                `Invoice Copy: ${item.attachment ? item.attachment.name : "Not attached"}`
+              if (!invoiceNo.trim()) {
+                Alert.alert("Required", "Enter invoice number.");
+                return;
+              }
+
+              if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
+                Alert.alert("Invalid Amount", "Enter a valid amount.");
+                return;
+              }
+
+              const entry = {
+                id: Date.now().toString(),
+                invoiceNo: invoiceNo.trim(),
+                invoiceDate: invoiceDate.trim() || today(),
+                amount: value,
+                paymentMode,
+                type: entryType,
+                attachment: attachment
+                  ? attachment.name
+                  : null
+              };
+
+              const list =
+                tab === "Customers" ? customers : suppliers;
+
+              const updated = list.map(person =>
+                person.id === selected.id
+                  ? {
+                      ...person,
+                      entries: [entry, ...(person.entries || [])]
+                    }
+                  : person
               );
+
+              if (tab === "Customers") {
+                setCustomers(updated);
+                await saveData(updated, suppliers);
+              } else {
+                setSuppliers(updated);
+                await saveData(customers, updated);
+              }
+
+              const fresh = updated.find(x => x.id === selected.id);
+              setSelected(fresh);
+
+              setInvoiceNo("");
+              setInvoiceDate(today());
+              setAmount("");
+              setPaymentMode("Cash");
+              setEntryType("Credit");
+              setAttachment(null);
+
+              Alert.alert("Saved", "Passbook entry saved.");
             };
 
-            const renderEntry = ({ item }) => (
-              <TouchableOpacity
-                style={styles.entryCard}
-                onPress={() => openEntry(item)}
-              >
+            const chooseInvoice = async () => {
 
-                <View style={styles.entryLeft}>
+              const result =
+                await DocumentPicker.getDocumentAsync({
+                  type: ["image/*", "application/pdf"],
+                  copyToCacheDirectory: true
+                });
 
-                  <Text style={styles.entryName}>
-                    {item.name}
-                  </Text>
+              if (!result.canceled && result.assets?.length) {
+                setAttachment(result.assets[0]);
+              }
+            };
 
-                  <Text style={styles.entryInvoice}>
-                    Invoice: {item.invoiceNo}
-                  </Text>
+            const total = useMemo(() => {
 
-                  <Text style={styles.entryDate}>
-                    Date: {item.invoiceDate}
-                  </Text>
+              if (!selected) return 0;
 
-                  <Text style={styles.entryPayment}>
-                    Payment: {item.paymentMode}
-                  </Text>
+              return (selected.entries || []).reduce(
+                (sum, e) =>
+                  e.type === "Credit"
+                    ? sum + e.amount
+                    : sum - e.amount,
+                0
+              );
 
-                  {item.attachment ? (
-                    <Text style={styles.attachmentText}>
-                      📎 {item.attachment.name}
+            }, [selected]);
+
+            const openProfile = person => {
+              setSelected(person);
+              setScreen("profile");
+            };
+
+            const openPassbook = person => {
+              setSelected(person);
+              setScreen("passbook");
+            };
+
+            const openNewPerson = () => {
+              resetProfile();
+              setScreen("new");
+            };
+
+            const goBack = () => {
+              setScreen("home");
+              setSelected(null);
+            };
+
+            if (screen === "new") {
+              return (
+                <SafeAreaView style={styles.container}>
+                  <StatusBar
+                    barStyle="light-content"
+                    backgroundColor="#0759a8"
+                  />
+
+                  <ScrollView>
+                    <Header title={`New ${tab === "Customers" ? "Customer" : "Supplier"} Profile`} />
+
+                    <View style={styles.form}>
+
+                      <Text style={styles.label}>Name *</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Customer / Supplier Name"
+                        value={name}
+                        onChangeText={setName}
+                      />
+
+                      <Text style={styles.label}>Phone Number</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Phone Number"
+                        keyboardType="phone-pad"
+                        value={phone}
+                        onChangeText={setPhone}
+                      />
+
+                      <Text style={styles.label}>GST Number</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="GST Number"
+                        value={gst}
+                        onChangeText={setGst}
+                        autoCapitalize="characters"
+                      />
+
+                      <Text style={styles.label}>Email ID</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Email ID"
+                        keyboardType="email-address"
+                        value={email}
+                        onChangeText={setEmail}
+                      />
+
+                      <Text style={styles.label}>Address</Text>
+                      <TextInput
+                        style={[styles.input, styles.address]}
+                        placeholder="Full Address"
+                        multiline
+                        value={address}
+                        onChangeText={setAddress}
+                      />
+
+                      <Button
+                        text="SAVE PROFILE"
+                        onPress={addPerson}
+                      />
+
+                      <Button
+                        text="CANCEL"
+                        secondary
+                        onPress={goBack}
+                      />
+
+                    </View>
+                  </ScrollView>
+                </SafeAreaView>
+              );
+            }
+
+            if (screen === "profile" && selected) {
+              return (
+                <SafeAreaView style={styles.container}>
+                  <StatusBar
+                    barStyle="light-content"
+                    backgroundColor="#0759a8"
+                  />
+
+                  <ScrollView>
+
+                    <Header title="Profile" />
+
+                    <View style={styles.profileCard}>
+
+                      <Text style={styles.profileName}>
+                        {selected.name}
+                      </Text>
+
+                      <Info title="Phone Number" value={selected.phone} />
+                      <Info title="GST Number" value={selected.gst} />
+                      <Info title="Email ID" value={selected.email} />
+                      <Info title="Address" value={selected.address} />
+
+                    </View>
+
+                    <View style={styles.profileActions}>
+
+                      <Button
+                        text="OPEN PASSBOOK"
+                        onPress={() => openPassbook(selected)}
+                      />
+
+                      <Button
+                        text="BACK"
+                        secondary
+                        onPress={goBack}
+                      />
+
+                    </View>
+
+                  </ScrollView>
+                </SafeAreaView>
+              );
+            }
+
+            if (screen === "passbook" && selected) {
+              return (
+                <SafeAreaView style={styles.container}>
+                  <StatusBar
+                    barStyle="light-content"
+                    backgroundColor="#0759a8"
+                  />
+
+                  <ScrollView>
+
+                    <Header title="Passbook" />
+
+                    <View style={styles.passbookHead}>
+
+                      <Text style={styles.profileName}>
+                        {selected.name}
+                      </Text>
+
+                      <Text style={styles.small}>
+                        {selected.phone || "No phone number"}
+                      </Text>
+
+                      <Text style={styles.balance}>
+                        Balance: ₹{Math.abs(total).toLocaleString("en-IN")}
+                      </Text>
+
+                      <Text style={styles.balanceType}>
+                        {total >= 0 ? "Credit Balance" : "Debit Balance"}
+                      </Text>
+
+                    </View>
+
+                    <View style={styles.form}>
+
+                      <Text style={styles.formTitle}>
+                        New Passbook Entry
+                      </Text>
+
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Invoice Number"
+                        value={invoiceNo}
+                        onChangeText={setInvoiceNo}
+                      />
+
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Invoice Date"
+                        value={invoiceDate}
+                        onChangeText={setInvoiceDate}
+                      />
+
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Amount"
+                        keyboardType="numeric"
+                        value={amount}
+                        onChangeText={setAmount}
+                      />
+
+                      <Text style={styles.label}>
+                        Transaction Type
+                      </Text>
+
+                      <View style={styles.row}>
+
+                        <TouchableOpacity
+                          style={[
+                            styles.choice,
+                            entryType === "Credit" &&
+                            styles.choiceActive
+                          ]}
+                          onPress={() => setEntryType("Credit")}
+                        >
+                          <Text style={styles.choiceText}>
+                            + Jama / Credit
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[
+                            styles.choice,
+                            entryType === "Debit" &&
+                            styles.choiceActive
+                          ]}
+                          onPress={() => setEntryType("Debit")}
+                        >
+                          <Text style={styles.choiceText}>
+                            - Udhar / Debit
+                          </Text>
+                        </TouchableOpacity>
+
+                      </View>
+
+                      <Text style={styles.label}>
+                        Mode of Payment
+                      </Text>
+
+                      <View style={styles.rowWrap}>
+
+                        {["Cash","UPI","Bank","Cheque","Credit","Other"].map(mode => (
+                          <TouchableOpacity
+                            key={mode}
+                            style={[
+                              styles.payment,
+                              paymentMode === mode &&
+                              styles.paymentActive
+                            ]}
+                            onPress={() => setPaymentMode(mode)}
+                          >
+                            <Text style={styles.paymentText}>
+                              {mode}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+
+                      </View>
+
+                      <TouchableOpacity
+                        style={styles.attach}
+                        onPress={chooseInvoice}
+                      >
+                        <Text style={styles.attachText}>
+                          📎 Attach Invoice Copy
+                        </Text>
+                      </TouchableOpacity>
+
+                      {attachment && (
+                        <Text style={styles.file}>
+                          Selected: {attachment.name}
+                        </Text>
+                      )}
+
+                      <Button
+                        text="SAVE PASSBOOK ENTRY"
+                        onPress={addTransaction}
+                      />
+
+                    </View>
+
+                    <Text style={styles.sectionTitle}>
+                      Transaction History
                     </Text>
-                  ) : null}
 
-                </View>
+                    {(selected.entries || []).length === 0 ? (
+                      <View style={styles.empty}>
+                        <Text>No transactions yet.</Text>
+                      </View>
+                    ) : (
+                      selected.entries.map(entry => (
+                        <View
+                          key={entry.id}
+                          style={styles.transaction}
+                        >
 
-                <View style={styles.entryRight}>
+                          <View style={{flex:1}}>
 
-                  <Text style={styles.amount}>
-                    ₹{Number(item.amount).toLocaleString("en-IN")}
-                  </Text>
+                            <Text style={styles.invoice}>
+                              Invoice: {entry.invoiceNo}
+                            </Text>
 
-                  <Text style={styles.viewText}>
-                    View
-                  </Text>
+                            <Text style={styles.small}>
+                              Date: {entry.invoiceDate}
+                            </Text>
 
-                </View>
+                            <Text style={styles.small}>
+                              Payment: {entry.paymentMode}
+                            </Text>
 
-              </TouchableOpacity>
-            );
+                            {entry.attachment && (
+                              <Text style={styles.file}>
+                                📎 {entry.attachment}
+                              </Text>
+                            )}
+
+                          </View>
+
+                          <View style={{alignItems:"flex-end"}}>
+
+                            <Text
+                              style={[
+                                styles.transactionAmount,
+                                {
+                                  color:
+                                    entry.type === "Credit"
+                                      ? "#16835c"
+                                      : "#c62828"
+                                }
+                              ]}
+                            >
+                              {entry.type === "Credit" ? "+" : "-"}
+                              ₹{entry.amount.toLocaleString("en-IN")}
+                            </Text>
+
+                            <Text style={styles.small}>
+                              {entry.type}
+                            </Text>
+
+                          </View>
+
+                        </View>
+                      ))
+                    )}
+
+                    <View style={styles.form}>
+                      <Button
+                        text="BACK TO PROFILE"
+                        secondary
+                        onPress={() => setScreen("profile")}
+                      />
+                    </View>
+
+                  </ScrollView>
+                </SafeAreaView>
+              );
+            }
 
             return (
-              <SafeAreaView style={styles.container}>
-
-                <StatusBar
-                  barStyle="light-content"
-                  backgroundColor="#0759a8"
-                />
-
-                <ScrollView
-                  contentContainerStyle={styles.scroll}
-                  keyboardShouldPersistTaps="handled"
+              <SafeAreaView styardShouldPersistTaps="handled"
                 >
 
                   <View style={styles.header}>

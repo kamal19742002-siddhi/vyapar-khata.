@@ -1,4 +1,4 @@
-name: Build Vyapar Khata AAB
+name: Build Vyapar Khata Advanced AAB
 
 on:
   workflow_dispatch:
@@ -14,250 +14,307 @@ jobs:
         with:
           node-version: 20
 
-      - name: Setup JDK 17
+      - name: Setup JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Create Vyapar Khata App
+      - name: Create Advanced Vyapar Khata
         run: |
           npx --yes create-expo-app@latest vyapar-khata --template blank --no-install
           cd vyapar-khata
 
           npm install
+          npx expo install @react-native-async-storage/async-storage
 
-          node - <<'NODE'
-          const fs = require("fs");
-
-          const app = JSON.parse(
-            fs.readFileSync("app.json", "utf8")
-          );
-
-          app.expo.name = "Vyapar Khata";
-          app.expo.slug = "vyapar-khata";
-          app.expo.version = "1.0.16";
-
-          app.expo.android = {
-            package: "com.vyapar.khatabook.free",
-            versionCode: 16
+          node -e "
+          const fs=require('fs');
+          const app=JSON.parse(fs.readFileSync('app.json'));
+          app.expo.name='Vyapar Khata Book';
+          app.expo.slug='vyapar-khata';
+          app.expo.version='1.0.16';
+          app.expo.android={
+            package:'com.vyapar.khatabook.free',
+            versionCode:16
           };
+          fs.writeFileSync('app.json',JSON.stringify(app,null,2));
+          "
 
-          fs.writeFileSync(
-            "app.json",
-            JSON.stringify(app, null, 2)
-          );
-          NODE
-
-          cat > App.js <<'EOF'
-          import React, { useMemo, useState } from "react";
+          cat <<'EOF' > App.js
+          import React, {useEffect, useMemo, useState} from 'react';
           import {
+            SafeAreaView,
+            StatusBar,
             StyleSheet,
             Text,
             View,
             TextInput,
             TouchableOpacity,
             FlatList,
-            SafeAreaView,
-            StatusBar,
+            Modal,
             Alert,
             ScrollView
-          } from "react-native";
+          } from 'react-native';
+          import AsyncStorage from '@react-native-async-storage/async-storage';
+
+          const INITIAL_CUSTOMERS = [
+            {id:'c1', name:'Ramesh Kumar', phone:'9876543210', balance:-500},
+            {id:'c2', name:'Suresh Patel', phone:'9876512345', balance:1200},
+            {id:'c3', name:'Mohan Sharma', phone:'9988776655', balance:0}
+          ];
+
+          const INITIAL_SUPPLIERS = [
+            {id:'s1', name:'Sharma Suppliers', phone:'9876500000', balance:3500},
+            {id:'s2', name:'Raj Traders', phone:'9876511111', balance:1800}
+          ];
 
           export default function App() {
 
-            const [customers, setCustomers] = useState([
-              {
-                id: "c1",
-                name: "Ramesh Kumar",
-                balance: 500
-              },
-              {
-                id: "c2",
-                name: "Suresh Patel",
-                balance: 1200
-              }
-            ]);
+            const [tab,setTab] = useState('customers');
+            const [section,setSection] = useState('parties');
 
-            const [suppliers, setSuppliers] = useState([
-              {
-                id: "s1",
-                name: "ABC Traders",
-                balance: 800
-              },
-              {
-                id: "s2",
-                name: "Sharma Suppliers",
-                balance: 1500
-              }
-            ]);
+            const [customers,setCustomers] = useState(INITIAL_CUSTOMERS);
+            const [suppliers,setSuppliers] = useState(INITIAL_SUPPLIERS);
+            const [transactions,setTransactions] = useState([]);
 
-            const [activeTab, setActiveTab] =
-              useState("customers");
+            const [search,setSearch] = useState('');
+            const [modal,setModal] = useState(false);
+            const [reportModal,setReportModal] = useState(false);
+            const [cashModal,setCashModal] = useState(false);
 
-            const [name, setName] = useState("");
-            const [amount, setAmount] = useState("");
+            const [name,setName] = useState('');
+            const [phone,setPhone] = useState('');
+            const [amount,setAmount] = useState('');
+            const [entryType,setEntryType] = useState('jama');
 
-            const currentList =
-              activeTab === "customers"
-                ? customers
-                : suppliers;
+            useEffect(()=>{
+              loadData();
+            },[]);
 
-            const customerTotal = useMemo(() => {
-              return customers.reduce(
-                (sum, item) => sum + item.balance,
-                0
+            const loadData = async()=>{
+              try{
+                const c=await AsyncStorage.getItem('customers');
+                const s=await AsyncStorage.getItem('suppliers');
+                const t=await AsyncStorage.getItem('transactions');
+
+                if(c) setCustomers(JSON.parse(c));
+                if(s) setSuppliers(JSON.parse(s));
+                if(t) setTransactions(JSON.parse(t));
+              }catch(e){}
+            };
+
+            const saveData = async(c,s,t)=>{
+              try{
+                await AsyncStorage.setItem('customers',JSON.stringify(c));
+                await AsyncStorage.setItem('suppliers',JSON.stringify(s));
+                await AsyncStorage.setItem('transactions',JSON.stringify(t));
+              }catch(e){}
+            };
+
+            const currentList = tab==='customers' ? customers : suppliers;
+
+            const filteredList = useMemo(()=>{
+              const q=search.toLowerCase().trim();
+              if(!q) return currentList;
+
+              return currentList.filter(x =>
+                x.name.toLowerCase().includes(q) ||
+                (x.phone||'').includes(q)
               );
-            }, [customers]);
+            },[currentList,search]);
 
-            const supplierTotal = useMemo(() => {
-              return suppliers.reduce(
-                (sum, item) => sum + item.balance,
-                0
-              );
-            }, [suppliers]);
+            const customerGet = customers.reduce(
+              (sum,x)=>sum+(x.balance>0?x.balance:0),0
+            );
 
-            const saveEntry = (type) => {
+            const customerGive = customers.reduce(
+              (sum,x)=>sum+(x.balance<0?Math.abs(x.balance):0),0
+            );
 
-              if (!name.trim()) {
-                Alert.alert(
-                  "Missing Name",
-                  "Please enter a name."
-                );
+            const supplierPayable = suppliers.reduce(
+              (sum,x)=>sum+(x.balance>0?x.balance:0),0
+            );
+
+            const totalTransactions = transactions.length;
+
+            const addParty = ()=>{
+              if(!name.trim()){
+                Alert.alert('Required','Name enter karein');
                 return;
               }
 
-              if (!amount.trim()) {
-                Alert.alert(
-                  "Missing Amount",
-                  "Please enter an amount."
-                );
-                return;
+              const newParty={
+                id:Date.now().toString(),
+                name:name.trim(),
+                phone:phone.trim(),
+                balance:0
+              };
+
+              let nc=customers;
+              let ns=suppliers;
+
+              if(tab==='customers'){
+                nc=[newParty,...customers];
+                setCustomers(nc);
+              }else{
+                ns=[newParty,...suppliers];
+                setSuppliers(ns);
               }
 
-              const value = Number(amount);
+              saveData(nc,ns,transactions);
 
-              if (!Number.isFinite(value) || value <= 0) {
-                Alert.alert(
-                  "Invalid Amount",
-                  "Please enter a valid amount."
-                );
-                return;
-              }
-
-              const list =
-                activeTab === "customers"
-                  ? customers
-                  : suppliers;
-
-              const index = list.findIndex(
-                item =>
-                  item.name.toLowerCase() ===
-                  name.trim().toLowerCase()
-              );
-
-              const change =
-                type === "add"
-                  ? value
-                  : -value;
-
-              const updated = [...list];
-
-              if (index >= 0) {
-
-                updated[index] = {
-                  ...updated[index],
-                  balance:
-                    updated[index].balance + change
-                };
-
-              } else {
-
-                updated.unshift({
-                  id: Date.now().toString(),
-                  name: name.trim(),
-                  balance: change
-                });
-
-              }
-
-              if (activeTab === "customers") {
-                setCustomers(updated);
-              } else {
-                setSuppliers(updated);
-              }
-
-              setName("");
-              setAmount("");
+              setName('');
+              setPhone('');
+              setModal(false);
 
               Alert.alert(
-                "Entry Saved",
-                activeTab === "customers"
-                  ? "Customer account updated."
-                  : "Supplier account updated."
+                'Success',
+                tab==='customers'
+                ? 'Customer added successfully'
+                : 'Supplier added successfully'
               );
             };
 
-            const renderAccount = ({ item }) => {
+            const addEntry = (party)=>{
+              const value=parseFloat(amount);
 
-              const positive =
-                item.balance >= 0;
+              if(!value || value<=0){
+                Alert.alert('Invalid Amount','Valid amount enter karein');
+                return;
+              }
 
-              return (
-                <View style={styles.accountCard}>
+              let change=0;
 
-                  <View style={styles.accountLeft}>
+              if(entryType==='jama'){
+                change=value;
+              }else{
+                change=-value;
+              }
 
-                    <Text style={styles.accountName}>
-                      {item.name}
-                    </Text>
-
-                    <Text style={styles.accountSub}>
-                      {activeTab === "customers"
-                        ? positive
-                          ? "Amount Receivable"
-                          : "Credit Balance"
-                        : positive
-                          ? "Amount Payable"
-                          : "Advance Paid"}
-                    </Text>
-
-                  </View>
-
-                  <View style={styles.accountRight}>
-
-                    <Text
-                      style={[
-                        styles.accountAmount,
-                        {
-                          color:
-                            activeTab === "customers"
-                              ? positive
-                                ? "#2e7d32"
-                                : "#c62828"
-                              : positive
-                                ? "#c62828"
-                                : "#2e7d32"
-                        }
-                      ]}
-                    >
-                      ₹ {Math.abs(item.balance)}
-                    </Text>
-
-                    <Text style={styles.accountStatus}>
-                      {activeTab === "customers"
-                        ? positive
-                          ? "To Receive"
-                          : "Adjusted"
-                        : positive
-                          ? "To Pay"
-                          : "Adjusted"}
-                    </Text>
-
-                  </View>
-
-                </View>
+              const updatedList=currentList.map(x =>
+                x.id===party.id
+                ? {...x,balance:x.balance+change}
+                : x
               );
+
+              let nc=customers;
+              let ns=suppliers;
+
+              if(tab==='customers'){
+                nc=updatedList;
+                setCustomers(updatedList);
+              }else{
+                ns=updatedList;
+                setSuppliers(updatedList);
+              }
+
+              const newTransaction={
+                id:Date.now().toString(),
+                party:party.name,
+                type:tab,
+                entry:entryType,
+                amount:value,
+                date:new Date().toLocaleString()
+              };
+
+              const nt=[newTransaction,...transactions];
+
+              setTransactions(nt);
+              saveData(nc,ns,nt);
+
+              setAmount('');
+
+              Alert.alert(
+                'Entry Saved',
+                entryType==='jama'
+                ? 'Jama entry save ho gayi'
+                : 'Udhar entry save ho gayi'
+              );
+            };
+
+            const partyCard=({item})=>(
+              <View style={styles.partyCard}>
+
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>
+                    {item.name.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+
+                <View style={{flex:1}}>
+                  <Text style={styles.partyName}>{item.name}</Text>
+                  <Text style={styles.phone}>
+                    {item.phone || 'Phone not added'}
+                  </Text>
+
+                  <Text style={styles.accountText}>
+                    Account Balance
+                  </Text>
+                </View>
+
+                <View style={{alignItems:'flex-end'}}>
+                  <Text
+                    style={[
+                      styles.balance,
+                      {color:item.balance>=0?'#16834b':'#c62828'}
+                    ]}
+                  >
+                    ₹ {Math.abs(item.balance).toLocaleString('en-IN')}
+                  </Text>
+
+                  <Text style={styles.balanceType}>
+                    {item.balance>0
+                      ? tab==='customers'?'You will get':'You will give'
+                      : item.balance<0
+                      ? tab==='customers'?'You will give':'You will get'
+                      : 'Settled'}
+                  </Text>
+
+                  <View style={styles.entryButtons}>
+
+                    <TouchableOpacity
+                      style={styles.smallRed}
+                      onPress={()=>{
+                        setEntryType('udhar');
+                        setAmount('');
+                        setName(item.name);
+                        setModal({party:item});
+                      }}
+                    >
+                      <Text style={styles.smallButtonText}>- Udhar</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.smallGreen}
+                      onPress={()=>{
+                        setEntryType('jama');
+                        setAmount('');
+                        setName(item.name);
+                        setModal({party:item});
+                      }}
+                    >
+                      <Text style={styles.smallButtonText}>+ Jama</Text>
+                    </TouchableOpacity>
+
+                  </View>
+                </View>
+
+              </View>
+            );
+
+            const savePartyEntry=()=>{
+              if(!modal?.party) return;
+
+              addEntry(modal.party);
+              setModal(false);
+            };
+
+            const openAddParty=()=>{
+              setName('');
+              setPhone('');
+              setAmount('');
+              setModal({add:true});
             };
 
             return (
@@ -265,426 +322,977 @@ jobs:
 
                 <StatusBar
                   barStyle="light-content"
-                  backgroundColor="#1a237e"
+                  backgroundColor="#0759a8"
                 />
 
-                <ScrollView>
+                <View style={styles.header}>
 
-                  <View style={styles.header}>
-
-                    <Text style={styles.headerTitle}>
-                      Vyapar Khata
+                  <View>
+                    <Text style={styles.businessName}>
+                      Siddhi Enterprises
                     </Text>
 
-                    <Text style={styles.headerSubtitle}>
-                      Digital Business Ledger
+                    <Text style={styles.location}>
+                      📍 Business Khata
                     </Text>
+                  </View>
+
+                  <Text style={styles.headerIcon}>⋮</Text>
+
+                </View>
+
+                <View style={styles.tabs}>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.tabButton,
+                      tab==='customers' && styles.activeTab
+                    ]}
+                    onPress={()=>{
+                      setTab('customers');
+                      setSearch('');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.tabText,
+                        tab==='customers' && styles.activeTabText
+                      ]}
+                    >
+                      CUSTOMERS
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.tabButton,
+                      tab==='suppliers' && styles.activeTab
+                    ]}
+                    onPress={()=>{
+                      setTab('suppliers');
+                      setSearch('');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.tabText,
+                        tab==='suppliers' && styles.activeTabText
+                      ]}
+                    >
+                      SUPPLIERS
+                    </Text>
+                  </TouchableOpacity>
+
+                </View>
+
+                <ScrollView
+                  style={{flex:1}}
+                  contentContainerStyle={{paddingBottom:110}}
+                >
+
+                  <View style={styles.summary}>
+
+                    <View style={styles.summaryBox}>
+                      <Text style={styles.summaryTitle}>
+                        You will give
+                      </Text>
+
+                      <Text style={styles.giveAmount}>
+                        ₹ {tab==='customers'
+                          ? customerGive.toLocaleString('en-IN')
+                          : supplierPayable.toLocaleString('en-IN')}
+                      </Text>
+                    </View>
+
+                    <View style={styles.divider}/>
+
+                    <View style={styles.summaryBox}>
+                      <Text style={styles.summaryTitle}>
+                        You will get
+                      </Text>
+
+                      <Text style={styles.getAmount}>
+                        ₹ {tab==='customers'
+                          ? customerGet.toLocaleString('en-IN')
+                          : '0'}
+                      </Text>
+                    </View>
 
                   </View>
 
-                  <View style={styles.summaryRow}>
-
-                    <View style={styles.summaryCard}>
-
-                      <Text style={styles.summaryTitle}>
-                        Customers
-                      </Text>
-
-                      <Text style={styles.customerAmount}>
-                        ₹ {customerTotal}
-                      </Text>
-
-                      <Text style={styles.summaryLabel}>
-                        Receivable
-                      </Text>
-
-                    </View>
-
-                    <View style={styles.summaryCard}>
-
-                      <Text style={styles.summaryTitle}>
-                        Suppliers
-                      </Text>
-
-                      <Text style={styles.supplierAmount}>
-                        ₹ {supplierTotal}
-                      </Text>
-
-                      <Text style={styles.summaryLabel}>
-                        Payable
-                      </Text>
-
-                    </View>
-
-                  </View>
-
-                  <View style={styles.tabs}>
+                  <View style={styles.quickRow}>
 
                     <TouchableOpacity
-                      style={[
-                        styles.tab,
-                        activeTab === "customers" &&
-                          styles.activeTab
-                      ]}
-                      onPress={() =>
-                        setActiveTab("customers")
-                      }
+                      style={styles.quickButton}
+                      onPress={()=>setReportModal(true)}
                     >
-                      <Text
-                        style={[
-                          styles.tabText,
-                          activeTab === "customers" &&
-                            styles.activeTabText
-                        ]}
-                      >
-                        Customers
-                      </Text>
+                      <Text style={styles.quickIcon}>▣</Text>
+                      <Text style={styles.quickText}>View Reports</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                      style={[
-                        styles.tab,
-                        activeTab === "suppliers" &&
-                          styles.activeTab
-                      ]}
-                      onPress={() =>
-                        setActiveTab("suppliers")
-                      }
+                      style={styles.quickButton}
+                      onPress={()=>setSection('passbook')}
                     >
-                      <Text
-                        style={[
-                          styles.tabText,
-                          activeTab === "suppliers" &&
-                            styles.activeTabText
-                        ]}
-                      >
-                        Suppliers
-                      </Text>
+                      <Text style={styles.quickIcon}>▤</Text>
+                      <Text style={styles.quickText}>Passbook</Text>
                     </TouchableOpacity>
 
                   </View>
 
-                  <View style={styles.form}>
-
-                    <Text style={styles.formTitle}>
-                      {activeTab === "customers"
-                        ? "Customer Entry"
-                        : "Supplier Entry"}
-                    </Text>
+                  <View style={styles.searchRow}>
 
                     <TextInput
-                      style={styles.input}
+                      style={styles.searchInput}
                       placeholder={
-                        activeTab === "customers"
-                          ? "Customer Name"
-                          : "Supplier Name"
+                        tab==='customers'
+                        ? 'Search Customer'
+                        : 'Search Supplier'
                       }
                       placeholderTextColor="#777"
-                      value={name}
-                      onChangeText={setName}
+                      value={search}
+                      onChangeText={setSearch}
                     />
 
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Amount (₹)"
-                      placeholderTextColor="#777"
-                      keyboardType="numeric"
-                      value={amount}
-                      onChangeText={setAmount}
-                    />
+                    <TouchableOpacity
+                      style={styles.filterButton}
+                      onPress={()=>{
+                        Alert.alert(
+                          'Filter',
+                          'Search box se name ya phone filter kar sakte hain.'
+                        );
+                      }}
+                    >
+                      <Text style={styles.filterIcon}>⌕</Text>
+                      <Text style={styles.filterText}>Filters</Text>
+                    </TouchableOpacity>
 
-                    <View style={styles.buttonRow}>
+                  </View>
 
-                      <TouchableOpacity
-                        style={[
-                          styles.actionButton,
-                          styles.minusButton
-                        ]}
-                        onPress={() =>
-                          saveEntry("subtract")
-                        }
-                      >
-                        <Text style={styles.buttonText}>
-                          − Payment
+                  {section==='parties' && (
+                    <>
+
+                      <View style={styles.listHeader}>
+
+                        <Text style={styles.listTitle}>
+                          {tab==='customers'
+                            ? 'Customer Accounts'
+                            : 'Supplier Accounts'}
                         </Text>
-                      </TouchableOpacity>
 
-                      <TouchableOpacity
-                        style={[
-                          styles.actionButton,
-                          styles.plusButton
-                        ]}
-                        onPress={() =>
-                          saveEntry("add")
-                        }
-                      >
-                        <Text style={styles.buttonText}>
-                          + Entry
+                        <Text style={styles.listCount}>
+                          {filteredList.length}
                         </Text>
-                      </TouchableOpacity>
+
+                      </View>
+
+                      <FlatList
+                        data={filteredList}
+                        keyExtractor={item=>item.id}
+                        renderItem={partyCard}
+                        scrollEnabled={false}
+                        ListEmptyComponent={
+                          <Text style={styles.empty}>
+                            No records found
+                          </Text>
+                        }
+                      />
+
+                    </>
+                  )}
+
+                  {section==='passbook' && (
+                    <View style={styles.sectionBox}>
+
+                      <Text style={styles.bigSectionTitle}>
+                        Passbook
+                      </Text>
+
+                      {transactions.length===0 ? (
+                        <Text style={styles.empty}>
+                          No transactions yet
+                        </Text>
+                      ) : transactions.map(t=>(
+                        <View
+                          key={t.id}
+                          style={styles.transaction}
+                        >
+                          <View style={{flex:1}}>
+                            <Text style={styles.transactionName}>
+                              {t.party}
+                            </Text>
+
+                            <Text style={styles.transactionDate}>
+                              {t.date}
+                            </Text>
+
+                            <Text style={styles.transactionType}>
+                              {t.type} • {t.entry}
+                            </Text>
+                          </View>
+
+                          <Text
+                            style={[
+                              styles.transactionAmount,
+                              {
+                                color:t.entry==='jama'
+                                  ? '#16834b'
+                                  : '#c62828'
+                              }
+                            ]}
+                          >
+                            {t.entry==='jama'?'+':'-'}
+                            ₹{t.amount.toLocaleString('en-IN')}
+                          </Text>
+                        </View>
+                      ))}
 
                     </View>
-
-                  </View>
-
-                  <View style={styles.listHeader}>
-
-                    <Text style={styles.listTitle}>
-                      {activeTab === "customers"
-                        ? "Customer Accounts"
-                        : "Supplier Accounts"}
-                    </Text>
-
-                    <Text style={styles.listCount}>
-                      {currentList.length} Accounts
-                    </Text>
-
-                  </View>
-
-                  <FlatList
-                    data={currentList}
-                    scrollEnabled={false}
-                    keyExtractor={item => item.id}
-                    renderItem={renderAccount}
-                    contentContainerStyle={
-                      styles.listContainer
-                    }
-                  />
-
-                  <View style={styles.footer}>
-
-                    <Text style={styles.footerText}>
-                      Vyapar Khata • Business Accounting
-                    </Text>
-
-                  </View>
+                  )}
 
                 </ScrollView>
+
+                <TouchableOpacity
+                  style={styles.addButton}
+                  onPress={openAddParty}
+                >
+                  <Text style={styles.addButtonText}>
+                    ＋ {tab==='customers'
+                      ? 'ADD CUSTOMER'
+                      : 'ADD SUPPLIER'}
+                  </Text>
+                </TouchableOpacity>
+
+                <View style={styles.bottomNav}>
+
+                  <TouchableOpacity
+                    onPress={()=>{
+                      setSection('parties');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.bottomText,
+                        section==='parties' && styles.bottomActive
+                      ]}
+                    >
+                      👥{'\n'}Parties
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={()=>{
+                      setSection('loans');
+                      Alert.alert(
+                        'Loans',
+                        'Loan records section ready for expansion.'
+                      );
+                    }}
+                  >
+                    <Text style={styles.bottomText}>
+                      ₹{'\n'}Loans
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={()=>{
+                      setCashModal(true);
+                    }}
+                  >
+                    <Text style={styles.bottomText}>
+                      ⋯{'\n'}More
+                    </Text>
+                  </TouchableOpacity>
+
+                </View>
+
+                <Modal
+                  visible={!!modal}
+                  transparent
+                  animationType="slide"
+                  onRequestClose={()=>setModal(false)}
+                >
+
+                  <View style={styles.modalBackground}>
+
+                    <View style={styles.modalBox}>
+
+                      {modal?.add ? (
+                        <>
+                          <Text style={styles.modalTitle}>
+                            {tab==='customers'
+                              ? 'Add Customer'
+                              : 'Add Supplier'}
+                          </Text>
+
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Name"
+                            value={name}
+                            onChangeText={setName}
+                          />
+
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Phone Number"
+                            keyboardType="phone-pad"
+                            value={phone}
+                            onChangeText={setPhone}
+                          />
+
+                          <TouchableOpacity
+                            style={styles.modalGreen}
+                            onPress={addParty}
+                          >
+                            <Text style={styles.modalButtonText}>
+                              SAVE
+                            </Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : (
+                        <>
+                          <Text style={styles.modalTitle}>
+                            New Khata Entry
+                          </Text>
+
+                          <Text style={styles.selectedParty}>
+                            {modal?.party?.name}
+                          </Text>
+
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Amount (₹)"
+                            keyboardType="numeric"
+                            value={amount}
+                            onChangeText={setAmount}
+                          />
+
+                          <View style={styles.modalRow}>
+
+                            <TouchableOpacity
+                              style={styles.modalRed}
+                              onPress={()=>{
+                                setEntryType('udhar');
+                                savePartyEntry();
+                              }}
+                            >
+                              <Text style={styles.modalButtonText}>
+                                - Udhar
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={styles.modalGreen}
+                              onPress={()=>{
+                                setEntryType('jama');
+                                savePartyEntry();
+                              }}
+                            >
+                              <Text style={styles.modalButtonText}>
+                                + Jama
+                              </Text>
+                            </TouchableOpacity>
+
+                          </View>
+                        </>
+                      )}
+
+                      <TouchableOpacity
+                        onPress={()=>setModal(false)}
+                        style={styles.cancel}
+                      >
+                        <Text style={styles.cancelText}>
+                          Cancel
+                        </Text>
+                      </TouchableOpacity>
+
+                    </View>
+                  </View>
+
+                </Modal>
+
+                <Modal
+                  visible={reportModal}
+                  transparent
+                  animationType="slide"
+                  onRequestClose={()=>setReportModal(false)}
+                >
+
+                  <View style={styles.modalBackground}>
+
+                    <View style={styles.modalBox}>
+
+                      <Text style={styles.modalTitle}>
+                        Business Reports
+                      </Text>
+
+                      <Text style={styles.reportLine}>
+                        Customers: {customers.length}
+                      </Text>
+
+                      <Text style={styles.reportLine}>
+                        Suppliers: {suppliers.length}
+                      </Text>
+
+                      <Text style={styles.reportLine}>
+                        Transactions: {totalTransactions}
+                      </Text>
+
+                      <Text style={styles.reportLine}>
+                        You will get: ₹{customerGet.toLocaleString('en-IN')}
+                      </Text>
+
+                      <Text style={styles.reportLine}>
+                        You will give: ₹{customerGive.toLocaleString('en-IN')}
+                      </Text>
+
+                      <TouchableOpacity
+                        style={styles.modalGreen}
+                        onPress={()=>setReportModal(false)}
+                      >
+                        <Text style={styles.modalButtonText}>
+                          CLOSE
+                        </Text>
+                      </TouchableOpacity>
+
+                    </View>
+
+                  </View>
+
+                </Modal>
+
+                <Modal
+                  visible={cashModal}
+                  transparent
+                  animationType="slide"
+                  onRequestClose={()=>setCashModal(false)}
+                >
+
+                  <View style={styles.modalBackground}>
+
+                    <View style={styles.modalBox}>
+
+                      <Text style={styles.modalTitle}>
+                        More
+                      </Text>
+
+                      <TouchableOpacity
+                        style={styles.moreItem}
+                        onPress={()=>{
+                          setCashModal(false);
+                          setReportModal(true);
+                        }}
+                      >
+                        <Text style={styles.moreText}>
+                          📊 Reports
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.moreItem}
+                        onPress={()=>{
+                          setCashModal(false);
+                          setSection('passbook');
+                        }}
+                      >
+                        <Text style={styles.moreText}>
+                          📒 Passbook
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.moreItem}
+                        onPress={()=>{
+                          setCashModal(false);
+                          Alert.alert(
+                            'Payment Reminder',
+                            'Reminder feature selected.'
+                          );
+                        }}
+                      >
+                        <Text style={styles.moreText}>
+                          🔔 Payment Reminder
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.moreItem}
+                        onPress={()=>{
+                          setCashModal(false);
+                          Alert.alert(
+                            'Cashbook',
+                            'Cashbook section selected.'
+                          );
+                        }}
+                      >
+                        <Text style={styles.moreText}>
+                          💰 Cashbook
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.cancel}
+                        onPress={()=>setCashModal(false)}
+                      >
+                        <Text style={styles.cancelText}>
+                          Close
+                        </Text>
+                      </TouchableOpacity>
+
+                    </View>
+
+                  </View>
+
+                </Modal>
 
               </SafeAreaView>
             );
           }
 
-          const styles = StyleSheet.create({
+          const styles=StyleSheet.create({
 
-            container: {
-              flex: 1,
-              backgroundColor: "#f4f6f8"
+            container:{
+              flex:1,
+              backgroundColor:'#f4f6f8'
             },
 
-            header: {
-              backgroundColor: "#1a237e",
-              paddingVertical: 20,
-              alignItems: "center"
+            header:{
+              backgroundColor:'#0759a8',
+              paddingHorizontal:20,
+              paddingTop:16,
+              paddingBottom:14,
+              flexDirection:'row',
+              justifyContent:'space-between',
+              alignItems:'center'
             },
 
-            headerTitle: {
-              color: "#ffffff",
-              fontSize: 28,
-              fontWeight: "bold"
+            businessName:{
+              color:'#fff',
+              fontSize:22,
+              fontWeight:'bold'
             },
 
-            headerSubtitle: {
-              color: "#c5cae9",
-              fontSize: 14,
-              marginTop: 4
+            location:{
+              color:'#dbeaff',
+              fontSize:14,
+              marginTop:4
             },
 
-            summaryRow: {
-              flexDirection: "row",
-              paddingHorizontal: 12,
-              marginTop: 12
+            headerIcon:{
+              color:'#fff',
+              fontSize:30
             },
 
-            summaryCard: {
-              flex: 1,
-              backgroundColor: "#ffffff",
-              marginHorizontal: 5,
-              padding: 15,
-              borderRadius: 12,
-              elevation: 3
+            tabs:{
+              flexDirection:'row',
+              backgroundColor:'#0759a8',
+              paddingHorizontal:18
             },
 
-            summaryTitle: {
-              fontSize: 15,
-              fontWeight: "bold",
-              color: "#333333"
+            tabButton:{
+              paddingVertical:13,
+              marginRight:30
             },
 
-            customerAmount: {
-              color: "#2e7d32",
-              fontSize: 22,
-              fontWeight: "bold",
-              marginTop: 7
+            activeTab:{
+              borderBottomWidth:4,
+              borderBottomColor:'#ffc928'
             },
 
-            supplierAmount: {
-              color: "#c62828",
-              fontSize: 22,
-              fontWeight: "bold",
-              marginTop: 7
+            tabText:{
+              color:'#d5e6fa',
+              fontSize:15,
+              fontWeight:'bold'
             },
 
-            summaryLabel: {
-              color: "#777777",
-              fontSize: 12,
-              marginTop: 3
+            activeTabText:{
+              color:'#fff'
             },
 
-            tabs: {
-              flexDirection: "row",
-              backgroundColor: "#ffffff",
-              margin: 16,
-              padding: 4,
-              borderRadius: 10,
-              elevation: 2
+            summary:{
+              backgroundColor:'#fff',
+              margin:14,
+              borderRadius:18,
+              flexDirection:'row',
+              paddingVertical:18,
+              elevation:3
             },
 
-            tab: {
-              flex: 1,
-              paddingVertical: 12,
-              alignItems: "center",
-              borderRadius: 8
+            summaryBox:{
+              flex:1,
+              alignItems:'center'
             },
 
-            activeTab: {
-              backgroundColor: "#1a237e"
+            summaryTitle:{
+              fontSize:16,
+              color:'#555'
             },
 
-            tabText: {
-              color: "#555555",
-              fontWeight: "600"
+            giveAmount:{
+              color:'#078447',
+              fontSize:25,
+              fontWeight:'bold',
+              marginTop:8
             },
 
-            activeTabText: {
-              color: "#ffffff"
+            getAmount:{
+              color:'#c62828',
+              fontSize:25,
+              fontWeight:'bold',
+              marginTop:8
             },
 
-            form: {
-              backgroundColor: "#ffffff",
-              marginHorizontal: 16,
-              marginBottom: 16,
-              padding: 15,
-              borderRadius: 12,
-              elevation: 3
+            divider:{
+              width:1,
+              backgroundColor:'#ddd'
             },
 
-            formTitle: {
-              fontSize: 19,
-              fontWeight: "bold",
-              color: "#333333",
-              marginBottom: 12
+            quickRow:{
+              flexDirection:'row',
+              marginHorizontal:14,
+              backgroundColor:'#e5f0fa',
+              borderRadius:15,
+              overflow:'hidden'
             },
 
-            input: {
-              backgroundColor: "#f9f9f9",
-              borderWidth: 1,
-              borderColor: "#dddddd",
-              borderRadius: 8,
-              padding: 12,
-              fontSize: 16,
-              marginBottom: 10
+            quickButton:{
+              flex:1,
+              flexDirection:'row',
+              justifyContent:'center',
+              alignItems:'center',
+              paddingVertical:15
             },
 
-            buttonRow: {
-              flexDirection: "row"
+            quickIcon:{
+              fontSize:22,
+              color:'#0759a8',
+              marginRight:8
             },
 
-            actionButton: {
-              flex: 1,
-              paddingVertical: 14,
-              borderRadius: 8,
-              alignItems: "center"
+            quickText:{
+              color:'#0759a8',
+              fontSize:17,
+              fontWeight:'bold'
             },
 
-            minusButton: {
-              backgroundColor: "#c62828",
-              marginRight: 5
+            searchRow:{
+              margin:14,
+              backgroundColor:'#fff',
+              borderRadius:15,
+              flexDirection:'row',
+              borderWidth:1,
+              borderColor:'#ddd',
+              overflow:'hidden'
             },
 
-            plusButton: {
-              backgroundColor: "#2e7d32",
-              marginLeft: 5
+            searchInput:{
+              flex:1,
+              paddingHorizontal:16,
+              fontSize:16,
+              height:58,
+              color:'#222'
             },
 
-            buttonText: {
-              color: "#ffffff",
-              fontWeight: "bold",
-              fontSize: 14
+            filterButton:{
+              width:75,
+              justifyContent:'center',
+              alignItems:'center',
+              borderLeftWidth:1,
+              borderLeftColor:'#ddd'
             },
 
-            listHeader: {
-              flexDirection: "row",
-              justifyContent: "space-between",
-              paddingHorizontal: 18,
-              marginBottom: 8
+            filterIcon:{
+              color:'#0759a8',
+              fontSize:25
             },
 
-            listTitle: {
-              fontSize: 18,
-              fontWeight: "bold",
-              color: "#333333"
+            filterText:{
+              color:'#0759a8',
+              fontSize:12
             },
 
-            listCount: {
-              fontSize: 13,
-              color: "#777777"
+            listHeader:{
+              flexDirection:'row',
+              justifyContent:'space-between',
+              paddingHorizontal:18,
+              marginBottom:8
             },
 
-            listContainer: {
-              paddingBottom: 10
+            listTitle:{
+              fontSize:21,
+              fontWeight:'bold',
+              color:'#333'
             },
 
-            accountCard: {
-              backgroundColor: "#ffffff",
-              marginHorizontal: 16,
-              marginBottom: 9,
-              padding: 15,
-              borderRadius: 10,
-              flexDirection: "row",
-              justifyContent: "space-between",
-              elevation: 2
+            listCount:{
+              fontSize:17,
+              color:'#777'
             },
 
-            accountLeft: {
-              flex: 1
+            partyCard:{
+              backgroundColor:'#fff',
+              marginHorizontal:14,
+              marginBottom:9,
+              padding:13,
+              borderRadius:15,
+              flexDirection:'row',
+              alignItems:'center',
+              elevation:2
             },
 
-            accountName: {
-              fontSize: 17,
-              fontWeight: "600",
-              color: "#222222"
+            avatar:{
+              width:45,
+              height:45,
+              borderRadius:25,
+              backgroundColor:'#edf2f7',
+              justifyContent:'center',
+              alignItems:'center',
+              marginRight:11
             },
 
-            accountSub: {
-              fontSize: 12,
-              color: "#777777",
-              marginTop: 5
+            avatarText:{
+              fontSize:19,
+              fontWeight:'bold',
+              color:'#555'
             },
 
-            accountRight: {
-              alignItems: "flex-end"
+            partyName:{
+              fontSize:17,
+              fontWeight:'bold',
+              color:'#222'
             },
 
-            accountAmount: {
-              fontSize: 18,
-              fontWeight: "bold"
+            phone:{
+              fontSize:12,
+              color:'#777',
+              marginTop:3
             },
 
-            accountStatus: {
-              fontSize: 11,
-              color: "#777777",
-              marginTop: 3
+            accountText:{
+              color:'#999',
+              fontSize:11,
+              marginTop:4
             },
 
-            footer: {
-              padding: 20,
-              alignItems: "center"
+            balance:{
+              fontSize:18,
+              fontWeight:'bold'
             },
 
-            footerText: {
-              color: "#888888",
-              fontSize: 12
+            balanceType:{
+              color:'#666',
+              fontSize:11,
+              marginTop:3
+            },
+
+            entryButtons:{
+              flexDirection:'row',
+              marginTop:7
+            },
+
+            smallRed:{
+              backgroundColor:'#d83232',
+              paddingHorizontal:7,
+              paddingVertical:5,
+              borderRadius:6,
+              marginRight:4
+            },
+
+            smallGreen:{
+              backgroundColor:'#2e7d32',
+              paddingHorizontal:7,
+              paddingVertical:5,
+              borderRadius:6
+            },
+
+            smallButtonText:{
+              color:'#fff',
+              fontSize:10,
+              fontWeight:'bold'
+            },
+
+            addButton:{
+              position:'absolute',
+              right:18,
+              bottom:72,
+              backgroundColor:'#b0005a',
+              paddingHorizontal:24,
+              paddingVertical:17,
+              borderRadius:35,
+              elevation:8
+            },
+
+            addButtonText:{
+              color:'#fff',
+              fontSize:15,
+              fontWeight:'bold'
+            },
+
+            bottomNav:{
+              position:'absolute',
+              bottom:0,
+              left:0,
+              right:0,
+              height:65,
+              backgroundColor:'#fff',
+              borderTopWidth:1,
+              borderTopColor:'#ddd',
+              flexDirection:'row',
+              justifyContent:'space-around',
+              alignItems:'center'
+            },
+
+            bottomText:{
+              textAlign:'center',
+              color:'#444',
+              fontSize:13
+            },
+
+            bottomActive:{
+              color:'#0759a8',
+              fontWeight:'bold'
+            },
+
+            modalBackground:{
+              flex:1,
+              backgroundColor:'rgba(0,0,0,.45)',
+              justifyContent:'flex-end'
+            },
+
+            modalBox:{
+              backgroundColor:'#fff',
+              borderTopLeftRadius:25,
+              borderTopRightRadius:25,
+              padding:22
+            },
+
+            modalTitle:{
+              fontSize:24,
+              fontWeight:'bold',
+              color:'#222',
+              marginBottom:18
+            },
+
+            selectedParty:{
+              fontSize:18,
+              fontWeight:'bold',
+              color:'#0759a8',
+              marginBottom:15
+            },
+
+            input:{
+              backgroundColor:'#f7f7f7',
+              borderWidth:1,
+              borderColor:'#ddd',
+              borderRadius:12,
+              padding:14,
+              fontSize:16,
+              marginBottom:12,
+              color:'#222'
+            },
+
+            modalRow:{
+              flexDirection:'row',
+              gap:10
+            },
+
+            modalRed:{
+              flex:1,
+              backgroundColor:'#d83232',
+              padding:15,
+              borderRadius:12,
+              alignItems:'center'
+            },
+
+            modalGreen:{
+              flex:1,
+              backgroundColor:'#2e7d32',
+              padding:15,
+              borderRadius:12,
+              alignItems:'center'
+            },
+
+            modalButtonText:{
+              color:'#fff',
+              fontWeight:'bold',
+              fontSize:16
+            },
+
+            cancel:{
+              alignItems:'center',
+              padding:14
+            },
+
+            cancelText:{
+              color:'#666',
+              fontSize:16
+            },
+
+            reportLine:{
+              fontSize:17,
+              color:'#333',
+              paddingVertical:8
+            },
+
+            sectionBox:{
+              margin:14,
+              backgroundColor:'#fff',
+              borderRadius:16,
+              padding:16
+            },
+
+            bigSectionTitle:{
+              fontSize:24,
+              fontWeight:'bold',
+              marginBottom:12
+            },
+
+            transaction:{
+              flexDirection:'row',
+              borderBottomWidth:1,
+              borderBottomColor:'#eee',
+              paddingVertical:13
+            },
+
+            transactionName:{
+              fontSize:16,
+              fontWeight:'bold'
+            },
+
+            transactionDate:{
+              color:'#888',
+              fontSize:11,
+              marginTop:3
+            },
+
+            transactionType:{
+              color:'#666',
+              fontSize:12,
+              marginTop:3
+            },
+
+            transactionAmount:{
+              fontSize:17,
+              fontWeight:'bold'
+            },
+
+            moreItem:{
+              backgroundColor:'#f5f7fa',
+              padding:17,
+              borderRadius:12,
+              marginBottom:10
+            },
+
+            moreText:{
+              fontSize:17,
+              color:'#222'
+            },
+
+            empty:{
+              textAlign:'center',
+              padding:30,
+              color:'#777',
+              fontSize:16
             }
 
           });
@@ -692,19 +1300,12 @@ jobs:
 
           npx expo prebuild --platform android --no-install
 
-      - name: Restore Existing Upload Keystore
+      - name: Restore Permanent Upload Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "ERROR: KEYSTORE_BASE64 secret is missing."
-            exit 1
-          fi
-
-          echo "$KEYSTORE_BASE64" | base64 --decode > \
-            vyapar-khata/android/app/upload-keystore.jks
-
-          test -s vyapar-khata/android/app/upload-keystore.jks
+          mkdir -p vyapar-khata/android/app
+          echo "$KEYSTORE_BASE64" | base64 --decode > vyapar-khata/android/app/upload-keystore.jks
 
       - name: Configure Release Signing
         env:
@@ -717,42 +1318,36 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path("app/build.gradle")
-          text = path.read_text()
+          p=Path("app/build.gradle")
+          data=p.read_text()
 
-          if "upload-keystore.jks" not in text:
+          if "upload-keystore.jks" not in data:
 
-              signing = """
-                  release {
-                      storeFile file('upload-keystore.jks')
-                      storePassword System.getenv("KEYSTORE_PASSWORD")
-                      keyAlias System.getenv("KEY_ALIAS")
-                      keyPassword System.getenv("KEY_PASSWORD")
-                  }
+              signing="""
+              release {
+                  storeFile file('upload-keystore.jks')
+                  storePassword System.getenv('KEYSTORE_PASSWORD')
+                  keyAlias System.getenv('KEY_ALIAS')
+                  keyPassword System.getenv('KEY_PASSWORD')
+              }
               """
 
-              marker = "signingConfigs {"
-
-              if marker not in text:
-                  raise SystemExit(
-                      "Could not find signingConfigs block."
-                  )
-
-              text = text.replace(
-                  marker,
-                  marker + signing,
+              data=data.replace(
+                  "signingConfigs {",
+                  "signingConfigs {" + signing,
                   1
               )
 
-          text = text.replace(
-              "signingConfig signingConfigs.debug",
-              "signingConfig signingConfigs.release"
-          )
+              data=data.replace(
+                  "signingConfig signingConfigs.debug",
+                  "signingConfig signingConfigs.release"
+              )
 
-          path.write_text(text)
+              p.write_text(data)
+
           PY
 
-      - name: Build Release AAB
+      - name: Build AAB
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -765,5 +1360,5 @@ jobs:
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: vyapar-khata-v16-aab
+          name: vyapar-khata-advanced-v16
           path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab

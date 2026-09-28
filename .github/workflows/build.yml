@@ -1,3 +1,4 @@
+```yaml
 name: Build Vyapar Khata AAB
 
 on:
@@ -32,10 +33,10 @@ jobs:
           const app=JSON.parse(fs.readFileSync('app.json'));
           app.expo.name='Vyapar Khata Book';
           app.expo.slug='vyapar-khata';
-          app.expo.version='1.0.9';
+          app.expo.version='1.0.10';
           app.expo.android={
             package:'com.vyapar.khatabook.free',
-            versionCode:14
+            versionCode:15
           };
           fs.writeFileSync('app.json',JSON.stringify(app,null,2));
           "
@@ -64,8 +65,15 @@ jobs:
             padding:25px 18px 28px;
             border-radius:0 0 25px 25px;
           }
-          .title{font-size:25px;font-weight:bold}
-          .sub{font-size:14px;margin-top:6px;opacity:.85}
+          .title{
+            font-size:25px;
+            font-weight:bold;
+          }
+          .sub{
+            font-size:14px;
+            margin-top:6px;
+            opacity:.9;
+          }
           .cards{
             display:grid;
             grid-template-columns:1fr 1fr;
@@ -79,10 +87,21 @@ jobs:
             padding:17px;
             box-shadow:0 3px 12px #00000012;
           }
-          .label{font-size:13px;color:#697386}
-          .amount{font-size:21px;font-weight:bold;margin-top:7px}
-          .receive{color:#078447}
-          .pay{color:#d34a4a}
+          .label{
+            font-size:13px;
+            color:#697386;
+          }
+          .amount{
+            font-size:21px;
+            font-weight:bold;
+            margin-top:7px;
+          }
+          .receive{
+            color:#078447;
+          }
+          .pay{
+            color:#d34a4a;
+          }
           .section{
             padding:5px 16px;
             font-size:19px;
@@ -101,8 +120,14 @@ jobs:
             font-size:15px;
             font-weight:bold;
           }
-          .add{background:#1261d8;color:white}
-          .view{background:white;color:#1261d8}
+          .add{
+            background:#1261d8;
+            color:white;
+          }
+          .view{
+            background:white;
+            color:#1261d8;
+          }
           .customer{
             background:white;
             margin:8px 16px;
@@ -112,9 +137,19 @@ jobs:
             justify-content:space-between;
             box-shadow:0 2px 9px #0000000d;
           }
-          .name{font-weight:bold;font-size:16px}
-          .phone{font-size:12px;color:#7b8494;margin-top:5px}
-          .bal{font-weight:bold;color:#078447}
+          .name{
+            font-weight:bold;
+            font-size:16px;
+          }
+          .phone{
+            font-size:12px;
+            color:#7b8494;
+            margin-top:5px;
+          }
+          .bal{
+            font-weight:bold;
+            color:#078447;
+          }
           .bottom{
             height:65px;
             background:white;
@@ -124,8 +159,15 @@ jobs:
             margin-top:18px;
             border-top:1px solid #e6e9ef;
           }
-          .nav{text-align:center;font-size:12px;color:#647084}
-          .nav.active{color:#1261d8;font-weight:bold}
+          .nav{
+            text-align:center;
+            font-size:12px;
+            color:#647084;
+          }
+          .nav.active{
+            color:#1261d8;
+            font-weight:bold;
+          }
           </style>
           </head>
 
@@ -133,7 +175,9 @@ jobs:
 
           <div class="top">
             <div class="title">Vyapar Khata Book</div>
-            <div class="sub">Manage your business accounts easily</div>
+            <div class="sub">
+              Manage your business accounts easily
+            </div>
           </div>
 
           <div class="cards">
@@ -148,27 +192,35 @@ jobs:
             </div>
           </div>
 
-          <div class="section">Quick Actions</div>
+          <div class="section">
+            Quick Actions
+          </div>
 
           <div class="actions">
-            <button class="add" onclick="alert('Add Customer')">
+            <button class="add"
+              onclick="alert('Add Customer')">
               + Add Customer
             </button>
 
-            <button class="view" onclick="alert('New Entry')">
+            <button class="view"
+              onclick="alert('New Entry')">
               + New Entry
             </button>
 
-            <button class="view" onclick="alert('Customers')">
+            <button class="view"
+              onclick="alert('Customers')">
               👥 Customers
             </button>
 
-            <button class="view" onclick="alert('Reports')">
+            <button class="view"
+              onclick="alert('Reports')">
               📊 Reports
             </button>
           </div>
 
-          <div class="section">Recent Customers</div>
+          <div class="section">
+            Recent Customers
+          </div>
 
           <div class="customer">
             <div>
@@ -205,16 +257,17 @@ jobs:
           </html>
           `;
 
-          export default function App(){
-            return(
+          export default function App() {
+            return (
               <SafeAreaView style={styles.container}>
                 <StatusBar
                   barStyle="light-content"
                   backgroundColor="#1261d8"
                 />
+
                 <WebView
-                  source={{html}}
-                  style={{flex:1}}
+                  source={{ html }}
+                  style={{ flex: 1 }}
                   javaScriptEnabled={true}
                   domStorageEnabled={true}
                 />
@@ -222,10 +275,10 @@ jobs:
             );
           }
 
-          const styles=StyleSheet.create({
-            container:{
-              flex:1,
-              backgroundColor:'#f4f7fb'
+          const styles = StyleSheet.create({
+            container: {
+              flex: 1,
+              backgroundColor: '#f4f7fb'
             }
           });
           EOF
@@ -288,5 +341,6 @@ jobs:
       - name: Upload AAB Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-bundle-v14
+          name: app-release-bundle-v15
           path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab
+```

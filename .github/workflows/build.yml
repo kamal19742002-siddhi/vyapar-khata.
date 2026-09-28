@@ -22,7 +22,7 @@ jobs:
         run: |
           npx --yes create-expo-app@latest vyapar-khata --template blank
           cd vyapar-khata
-          npx expo install expo-document-picker @react-native-async-storage/async-storage
+          npx expo install expo-document-picker @react-native-async-storage/async-storage expo-contacts
 
           node - <<'NODE'
           const fs = require("fs");
@@ -30,10 +30,11 @@ jobs:
           const app = JSON.parse(fs.readFileSync(p, "utf8"));
           app.expo.name = "Vyapar Khata";
           app.expo.slug = "vyapar-khata";
-          app.expo.version = "1.0.29";
+          app.expo.version = "1.0.30";
           app.expo.android = {
             package: "com.vyapar.khatabook.free",
-            versionCode: 29
+            versionCode: 30,
+            permissions: ["android.permission.READ_CONTACTS"]
           };
           fs.writeFileSync(p, JSON.stringify(app, null, 2));
           NODE
@@ -49,11 +50,11 @@ jobs:
             Text,
             TextInput,
             TouchableOpacity,
-            View,
-            FlatList
+            View
           } from "react-native";
           import AsyncStorage from "@react-native-async-storage/async-storage";
           import * as DocumentPicker from "expo-document-picker";
+          import * as Contacts from "expo-contacts";
 
           const STORE = "@vyapar_khata_data_v2";
 
@@ -99,16 +100,20 @@ jobs:
             const [suppliers, setSuppliers] = useState([]);
             const [selected, setSelected] = useState(null);
 
-            // Form States
+            // Profile Form
             const [name, setName] = useState("");
             const [phone, setPhone] = useState("");
             const [gst, setGst] = useState("");
             const [address, setAddress] = useState("");
             const [email, setEmail] = useState("");
+
+            // Passbook Entry Form
+            const [editingEntryId, setEditingEntryId] = useState(null);
             const [invoiceNo, setInvoiceNo] = useState("");
             const [invoiceDate, setInvoiceDate] = useState(today());
             const [amount, setAmount] = useState("");
             const [paymentMode, setPaymentMode] = useState("Cash");
+            const [paymentRef, setPaymentRef] = useState("");
             const [entryType, setEntryType] = useState("Credit");
             const [attachment, setAttachment] = useState(null);
 
@@ -142,17 +147,43 @@ jobs:
               setGst("");
               setAddress("");
               setEmail("");
+              resetEntryForm();
+            };
+
+            const resetEntryForm = () => {
+              setEditingEntryId(null);
               setInvoiceNo("");
               setInvoiceDate(today());
               setAmount("");
               setPaymentMode("Cash");
+              setPaymentRef("");
               setEntryType("Credit");
               setAttachment(null);
             };
 
+            const pickContact = async () => {
+              try {
+                const { status } = await Contacts.requestPermissionsAsync();
+                if (status !== "granted") {
+                  Alert.alert("Permission Required", "Contact chunne ke liye phone contacts permission allow karein.");
+                  return;
+                }
+                const contact = await Contacts.presentContactPickerAsync();
+                if (contact) {
+                  if (contact.name) setName(contact.name);
+                  if (contact.phoneNumbers && contact.phoneNumbers.length > 0) {
+                    const clean = contact.phoneNumbers[0].number.replace(/[^0-9+]/g, "");
+                    setPhone(clean);
+                  }
+                }
+              } catch (err) {
+                Alert.alert("Error", "Contact select nahi ho saka.");
+              }
+            };
+
             const addPerson = async () => {
               if (!name.trim()) {
-                Alert.alert("Required", "Please enter name.");
+                Alert.alert("Required", "Kripya naam enter karein.");
                 return;
               }
               const person = {
@@ -175,41 +206,67 @@ jobs:
               }
               resetProfile();
               setScreen("home");
-              Alert.alert(
-                "Saved",
-                `${tab === "Customers" ? "Customer" : "Supplier"} profile saved.`
-              );
+              Alert.alert("Saved", `${tab === "Customers" ? "Customer" : "Supplier"} save ho gaya.`);
+            };
+
+            const startEditEntry = (entry) => {
+              setEditingEntryId(entry.id);
+              setInvoiceNo(entry.invoiceNo);
+              setInvoiceDate(entry.invoiceDate);
+              setAmount(String(entry.amount));
+              setPaymentMode(entry.paymentMode || "Cash");
+              setPaymentRef(entry.paymentRef || "");
+              setEntryType(entry.type || "Credit");
+              setAttachment(entry.attachment ? { name: entry.attachment } : null);
             };
 
             const addTransaction = async () => {
               if (!selected) return;
               const value = Number(amount);
               if (!invoiceNo.trim()) {
-                Alert.alert("Required", "Enter invoice number.");
+                Alert.alert("Required", "Invoice number enter karein.");
                 return;
               }
               if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
-                Alert.alert("Invalid Amount", "Enter a valid amount.");
+                Alert.alert("Invalid Amount", "Valid amount enter karein.");
                 return;
               }
-              const entry = {
-                id: Date.now().toString(),
-                invoiceNo: invoiceNo.trim(),
-                invoiceDate: invoiceDate.trim() || today(),
-                amount: value,
-                paymentMode,
-                type: entryType,
-                attachment: attachment ? attachment.name : null
-              };
+
+              let updatedEntries;
+              if (editingEntryId) {
+                updatedEntries = (selected.entries || []).map((e) =>
+                  e.id === editingEntryId
+                    ? {
+                        ...e,
+                        invoiceNo: invoiceNo.trim(),
+                        invoiceDate: invoiceDate.trim() || today(),
+                        amount: value,
+                        paymentMode,
+                        paymentRef: paymentRef.trim(),
+                        type: entryType,
+                        attachment: attachment ? attachment.name : null
+                      }
+                    : e
+                );
+              } else {
+                const newEntry = {
+                  id: Date.now().toString(),
+                  invoiceNo: invoiceNo.trim(),
+                  invoiceDate: invoiceDate.trim() || today(),
+                  amount: value,
+                  paymentMode,
+                  paymentRef: paymentRef.trim(),
+                  type: entryType,
+                  attachment: attachment ? attachment.name : null
+                };
+                updatedEntries = [newEntry, ...(selected.entries || [])];
+              }
+
               const list = tab === "Customers" ? customers : suppliers;
-              const updated = list.map(person =>
-                person.id === selected.id
-                  ? {
-                      ...person,
-                      entries: [entry, ...(person.entries || [])]
-                    }
-                  : person
+              const updated = list.map((p) =>
+                p.id === selected.id ? { ...p, entries: updatedEntries } : p
               );
+
               if (tab === "Customers") {
                 setCustomers(updated);
                 await saveData(updated, suppliers);
@@ -217,15 +274,11 @@ jobs:
                 setSuppliers(updated);
                 await saveData(customers, updated);
               }
-              const fresh = updated.find(x => x.id === selected.id);
+
+              const fresh = updated.find((x) => x.id === selected.id);
               setSelected(fresh);
-              setInvoiceNo("");
-              setInvoiceDate(today());
-              setAmount("");
-              setPaymentMode("Cash");
-              setEntryType("Credit");
-              setAttachment(null);
-              Alert.alert("Saved", "Passbook entry saved.");
+              resetEntryForm();
+              Alert.alert("Success", editingEntryId ? "Entry update ho gayi." : "Entry save ho gayi.");
             };
 
             const chooseInvoice = async () => {
@@ -270,12 +323,13 @@ jobs:
               );
             }, [suppliers]);
 
-            const openPassbook = person => {
+            const openPassbook = (person) => {
               setSelected(person);
+              resetEntryForm();
               setScreen("passbook");
             };
 
-            const openProfile = person => {
+            const openProfile = (person) => {
               setSelected(person);
               setScreen("profile");
             };
@@ -293,6 +347,167 @@ jobs:
                     <Header title={`New ${tab === "Customers" ? "Customer" : "Supplier"}`} />
                     <View style={styles.form}>
                       <Text style={styles.label}>Name *</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Customer / Supplier Name"
+                        value={name}
+                        onChangeText={setName}
+                      />
+
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                        <Text style={styles.label}>Phone Number</Text>
+                        <TouchableOpacity onPress={pickContact} style={styles.pickContactBtn}>
+                          <Text style={styles.pickContactText}>📞 Contacts se chunein</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Phone Number"
+                        keyboardType="phone-pad"
+                        value={phone}
+                        onChangeText={setPhone}
+                      />
+
+                      <Text style={styles.label}>GST Number</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="GST Number"
+                        value={gst}
+                        onChangeText={setGst}
+                        autoCapitalize="characters"
+                      />
+                      <Text style={styles.label}>Email ID</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Email ID"
+                        keyboardType="email-address"
+                        value={email}
+                        onChangeText={setEmail}
+                      />
+                      <Text style={styles.label}>Address</Text>
+                      <TextInput
+                        style={[styles.input, { height: 70 }]}
+                        placeholder="Full Address"
+                        multiline
+                        value={address}
+                        onChangeText={setAddress}
+                      />
+                      <Button text="SAVE PROFILE" onPress={addPerson} />
+                      <Button text="CANCEL" secondary onPress={goBack} />
+                    </View>
+                  </ScrollView>
+                </SafeAreaView>
+              );
+            }
+
+            if (screen === "profile" && selected) {
+              return (
+                <SafeAreaView style={styles.container}>
+                  <StatusBar barStyle="light-content" backgroundColor="#0759a8" />
+                  <ScrollView>
+                    <Header title="Profile" />
+                    <View style={styles.card}>
+                      <Text style={styles.title}>{selected.name}</Text>
+                      <Info title="Phone Number" value={selected.phone} />
+                      <Info title="GST Number" value={selected.gst} />
+                      <Info title="Email ID" value={selected.email} />
+                      <Info title="Address" value={selected.address} />
+                    </View>
+                    <View style={styles.form}>
+                      <Button text="OPEN PASSBOOK" onPress={() => openPassbook(selected)} />
+                      <Button text="BACK" secondary onPress={goBack} />
+                    </View>
+                  </ScrollView>
+                </SafeAreaView>
+              );
+            }
+
+            if (screen === "passbook" && selected) {
+              return (
+                <SafeAreaView style={styles.container}>
+                  <StatusBar barStyle="light-content" backgroundColor="#0759a8" />
+                  <ScrollView>
+                    <Header title="Passbook" />
+                    <View style={styles.card}>
+                      <Text style={styles.title}>{selected.name}</Text>
+                      <Text style={styles.small}>{selected.phone || "No phone"}</Text>
+                      <Text style={styles.balance}>
+                        Balance: ₹{Math.abs(total).toLocaleString("en-IN")}
+                      </Text>
+                      <Text style={styles.balanceType}>
+                        {total >= 0 ? "Credit Balance" : "Debit Balance"}
+                      </Text>
+                    </View>
+
+                    <View style={styles.form}>
+                      <Text style={styles.formTitle}>
+                        {editingEntryId ? "Edit Passbook Entry" : "New Passbook Entry"}
+                      </Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Invoice Number"
+                        value={invoiceNo}
+                        onChangeText={setInvoiceNo}
+                      />
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Invoice Date"
+                        value={invoiceDate}
+                        onChangeText={setInvoiceDate}
+                      />
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Amount"
+                        keyboardType="numeric"
+                        value={amount}
+                        onChangeText={setAmount}
+                      />
+
+                      <View style={styles.row}>
+                        <TouchableOpacity
+                          style={[styles.choice, entryType === "Credit" && styles.choiceActive]}
+                          onPress={() => setEntryType("Credit")}
+                        >
+                          <Text style={[styles.choiceText, entryType === "Credit" && styles.activeChoiceText]}>
+                            + Jama / Credit
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.choice, entryType === "Debit" && styles.choiceActive]}
+                          onPress={() => setEntryType("Debit")}
+                        >
+                          <Text style={[styles.choiceText, entryType === "Debit" && styles.activeChoiceText]}>
+                            - Udhar / Debit
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      <Text style={styles.label}>Mode of Payment</Text>
+                      <View style={styles.rowWrap}>
+                        {["Cash", "UPI", "Bank", "Cheque", "Credit"].map((mode) => (
+                          <TouchableOpacity
+                            key={mode}
+                            style={[styles.payment, paymentMode === mode && styles.paymentActive]}
+                            onPress={() => setPaymentMode(mode)}
+                          >
+                            <Text style={[styles.paymentText, paymentMode === mode && styles.paymentTextActive]}>
+                              {mode}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      {/* Dynamic Payment Reference Input */}
+                      {paymentMode !== "Cash" && paymentMode !== "Credit" && (
+                        <TextInput
+                          style={styles.input}
+                          placeholder={
+                            paymentMode === "UPI"
+                              ? "Enter UPI Ref / UTR / Transaction ID"
+                              : paymentMode === "Cheque"
+                              ? "Enter Cheque No. & Bank Name"
+                           s.label}>Name *</Text>
                       <TextInput
                         style={styles.input}
                         placeholder="Customer / Supplier Name"

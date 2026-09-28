@@ -1,4 +1,6 @@
+```yaml
 name: Build Vyapar Khata AAB
+
 on:
   workflow_dispatch:
 
@@ -7,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -19,6 +22,7 @@ jobs:
           java-version: "17"
 
       - name: Create Vyapar Khata App
+        shell: bash
         run: |
           npx --yes create-expo-app@latest vyapar-khata --template blank --no-install
           cd vyapar-khata
@@ -26,230 +30,268 @@ jobs:
           npm install
           npx expo install react-native-webview
 
-          node -e "
-          const fs=require('fs');
-          const app=JSON.parse(fs.readFileSync('app.json'));
-          app.expo.name='Vyapar Khata Book';
-          app.expo.slug='vyapar-khata';
-          app.expo.version='1.0.10';
-          app.expo.android={
-            package:'com.vyapar.khatabook.free',
-            versionCode:15
-          };
-          fs.writeFileSync('app.json',JSON.stringify(app,null,2));
-          "
+          node <<'NODE'
+          const fs = require("fs");
 
-          cat <<'EOF' > App.js
-          import React from 'react';
-          import { SafeAreaView, StatusBar, StyleSheet } from 'react-native';
-          import { WebView } from 'react-native-webview';
+          const app = JSON.parse(
+            fs.readFileSync("app.json", "utf8")
+          );
+
+          app.expo.name = "Vyapar Khata Book";
+          app.expo.slug = "vyapar-khata";
+          app.expo.version = "1.0.10";
+
+          app.expo.android = {
+            package: "com.vyapar.khatabook.free",
+            versionCode: 15
+          };
+
+          fs.writeFileSync(
+            "app.json",
+            JSON.stringify(app, null, 2)
+          );
+          NODE
+
+          cat > App.js <<'EOF'
+          import React from "react";
+          import {
+            SafeAreaView,
+            StatusBar,
+            StyleSheet
+          } from "react-native";
+          import { WebView } from "react-native-webview";
 
           const html = `
           <!DOCTYPE html>
           <html>
           <head>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-          *{box-sizing:border-box}
-          body{
-            margin:0;
-            font-family:Arial,sans-serif;
-            background:#f4f7fb;
-            color:#172033;
-          }
-          .top{
-            background:linear-gradient(135deg,#1261d8,#063b9d);
-            color:white;
-            padding:25px 18px 28px;
-            border-radius:0 0 25px 25px;
-          }
-          .title{
-            font-size:25px;
-            font-weight:bold;
-          }
-          .sub{
-            font-size:14px;
-            margin-top:6px;
-            opacity:.9;
-          }
-          .cards{
-            display:grid;
-            grid-template-columns:1fr 1fr;
-            gap:12px;
-            padding:16px;
-            margin-top:-12px;
-          }
-          .card{
-            background:white;
-            border-radius:17px;
-            padding:17px;
-            box-shadow:0 3px 12px #00000012;
-          }
-          .label{
-            font-size:13px;
-            color:#697386;
-          }
-          .amount{
-            font-size:21px;
-            font-weight:bold;
-            margin-top:7px;
-          }
-          .receive{
-            color:#078447;
-          }
-          .pay{
-            color:#d34a4a;
-          }
-          .section{
-            padding:5px 16px;
-            font-size:19px;
-            font-weight:bold;
-          }
-          .actions{
-            display:grid;
-            grid-template-columns:1fr 1fr;
-            gap:12px;
-            padding:12px 16px 18px;
-          }
-          button{
-            border:0;
-            padding:16px 8px;
-            border-radius:15px;
-            font-size:15px;
-            font-weight:bold;
-          }
-          .add{
-            background:#1261d8;
-            color:white;
-          }
-          .view{
-            background:white;
-            color:#1261d8;
-          }
-          .customer{
-            background:white;
-            margin:8px 16px;
-            padding:16px;
-            border-radius:16px;
-            display:flex;
-            justify-content:space-between;
-            box-shadow:0 2px 9px #0000000d;
-          }
-          .name{
-            font-weight:bold;
-            font-size:16px;
-          }
-          .phone{
-            font-size:12px;
-            color:#7b8494;
-            margin-top:5px;
-          }
-          .bal{
-            font-weight:bold;
-            color:#078447;
-          }
-          .bottom{
-            height:65px;
-            background:white;
-            display:flex;
-            justify-content:space-around;
-            align-items:center;
-            margin-top:18px;
-            border-top:1px solid #e6e9ef;
-          }
-          .nav{
-            text-align:center;
-            font-size:12px;
-            color:#647084;
-          }
-          .nav.active{
-            color:#1261d8;
-            font-weight:bold;
-          }
-          </style>
+            <meta name="viewport"
+                  content="width=device-width, initial-scale=1.0">
+
+            <style>
+              * {
+                box-sizing: border-box;
+              }
+
+              body {
+                margin: 0;
+                font-family: Arial, sans-serif;
+                background: #f4f7fb;
+                color: #172033;
+              }
+
+              .top {
+                background: #1261d8;
+                color: white;
+                padding: 25px 18px 28px;
+                border-radius: 0 0 25px 25px;
+              }
+
+              .title {
+                font-size: 25px;
+                font-weight: bold;
+              }
+
+              .sub {
+                font-size: 14px;
+                margin-top: 6px;
+              }
+
+              .cards {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+                padding: 16px;
+              }
+
+              .card {
+                background: white;
+                border-radius: 17px;
+                padding: 17px;
+              }
+
+              .label {
+                font-size: 13px;
+                color: #697386;
+              }
+
+              .amount {
+                font-size: 21px;
+                font-weight: bold;
+                margin-top: 7px;
+              }
+
+              .receive {
+                color: #078447;
+              }
+
+              .pay {
+                color: #d34a4a;
+              }
+
+              .section {
+                padding: 8px 16px;
+                font-size: 19px;
+                font-weight: bold;
+              }
+
+              .actions {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+                padding: 12px 16px 18px;
+              }
+
+              button {
+                border: 0;
+                padding: 16px 8px;
+                border-radius: 15px;
+                font-size: 15px;
+                font-weight: bold;
+              }
+
+              .add {
+                background: #1261d8;
+                color: white;
+              }
+
+              .view {
+                background: white;
+                color: #1261d8;
+              }
+
+              .customer {
+                background: white;
+                margin: 8px 16px;
+                padding: 16px;
+                border-radius: 16px;
+                display: flex;
+                justify-content: space-between;
+              }
+
+              .name {
+                font-weight: bold;
+                font-size: 16px;
+              }
+
+              .phone {
+                font-size: 12px;
+                color: #7b8494;
+                margin-top: 5px;
+              }
+
+              .bal {
+                font-weight: bold;
+                color: #078447;
+              }
+
+              .bottom {
+                height: 65px;
+                background: white;
+                display: flex;
+                justify-content: space-around;
+                align-items: center;
+                margin-top: 18px;
+              }
+
+              .nav {
+                text-align: center;
+                font-size: 12px;
+                color: #647084;
+              }
+
+              .active {
+                color: #1261d8;
+                font-weight: bold;
+              }
+            </style>
           </head>
 
           <body>
 
-          <div class="top">
-            <div class="title">Vyapar Khata Book</div>
-            <div class="sub">
-              Manage your business accounts easily
-            </div>
-          </div>
-
-          <div class="cards">
-            <div class="card">
-              <div class="label">You will receive</div>
-              <div class="amount receive">₹25,450</div>
+            <div class="top">
+              <div class="title">Vyapar Khata Book</div>
+              <div class="sub">
+                Manage your business accounts easily
+              </div>
             </div>
 
-            <div class="card">
-              <div class="label">You will pay</div>
-              <div class="amount pay">₹8,750</div>
+            <div class="cards">
+
+              <div class="card">
+                <div class="label">You will receive</div>
+                <div class="amount receive">₹25,450</div>
+              </div>
+
+              <div class="card">
+                <div class="label">You will pay</div>
+                <div class="amount pay">₹8,750</div>
+              </div>
+
             </div>
-          </div>
 
-          <div class="section">
-            Quick Actions
-          </div>
-
-          <div class="actions">
-            <button class="add"
-              onclick="alert('Add Customer')">
-              + Add Customer
-            </button>
-
-            <button class="view"
-              onclick="alert('New Entry')">
-              + New Entry
-            </button>
-
-            <button class="view"
-              onclick="alert('Customers')">
-              👥 Customers
-            </button>
-
-            <button class="view"
-              onclick="alert('Reports')">
-              📊 Reports
-            </button>
-          </div>
-
-          <div class="section">
-            Recent Customers
-          </div>
-
-          <div class="customer">
-            <div>
-              <div class="name">Rahul Traders</div>
-              <div class="phone">98765 43210</div>
+            <div class="section">
+              Quick Actions
             </div>
-            <div class="bal">₹12,500</div>
-          </div>
 
-          <div class="customer">
-            <div>
-              <div class="name">Amit Enterprises</div>
-              <div class="phone">98765 12345</div>
+            <div class="actions">
+
+              <button class="add"
+                onclick="alert('Add Customer')">
+                + Add Customer
+              </button>
+
+              <button class="view"
+                onclick="alert('New Entry')">
+                + New Entry
+              </button>
+
+              <button class="view"
+                onclick="alert('Customers')">
+                Customers
+              </button>
+
+              <button class="view"
+                onclick="alert('Reports')">
+                Reports
+              </button>
+
             </div>
-            <div class="bal">₹7,950</div>
-          </div>
 
-          <div class="customer">
-            <div>
-              <div class="name">Sharma Store</div>
-              <div class="phone">99887 66554</div>
+            <div class="section">
+              Recent Customers
             </div>
-            <div class="bal">₹5,000</div>
-          </div>
 
-          <div class="bottom">
-            <div class="nav active">🏠<br>Home</div>
-            <div class="nav">👥<br>Customers</div>
-            <div class="nav">📒<br>Khata</div>
-            <div class="nav">📊<br>Reports</div>
-          </div>
+            <div class="customer">
+              <div>
+                <div class="name">Rahul Traders</div>
+                <div class="phone">98765 43210</div>
+              </div>
+              <div class="bal">₹12,500</div>
+            </div>
+
+            <div class="customer">
+              <div>
+                <div class="name">Amit Enterprises</div>
+                <div class="phone">98765 12345</div>
+              </div>
+              <div class="bal">₹7,950</div>
+            </div>
+
+            <div class="customer">
+              <div>
+                <div class="name">Sharma Store</div>
+                <div class="phone">99887 66554</div>
+              </div>
+              <div class="bal">₹5,000</div>
+            </div>
+
+            <div class="bottom">
+              <div class="nav active">Home</div>
+              <div class="nav">Customers</div>
+              <div class="nav">Khata</div>
+              <div class="nav">Reports</div>
+            </div>
 
           </body>
           </html>
@@ -258,6 +300,7 @@ jobs:
           export default function App() {
             return (
               <SafeAreaView style={styles.container}>
+
                 <StatusBar
                   barStyle="light-content"
                   backgroundColor="#1261d8"
@@ -265,10 +308,11 @@ jobs:
 
                 <WebView
                   source={{ html }}
-                  style={{ flex: 1 }}
+                  style={styles.webview}
                   javaScriptEnabled={true}
                   domStorageEnabled={true}
                 />
+
               </SafeAreaView>
             );
           }
@@ -276,7 +320,10 @@ jobs:
           const styles = StyleSheet.create({
             container: {
               flex: 1,
-              backgroundColor: '#f4f7fb'
+              backgroundColor: "#f4f7fb"
+            },
+            webview: {
+              flex: 1
             }
           });
           EOF
@@ -294,16 +341,17 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        shell: bash
         run: |
           cd vyapar-khata/android
 
-          python3 - <<'PY'
+          python3 <<'PY'
           from pathlib import Path
 
-          p = Path("app/build.gradle")
-          data = p.read_text()
+          path = Path("app/build.gradle")
+          text = path.read_text()
 
-          signing_block = """
+          release_block = """
               release {
                   storeFile file('upload-keystore.jks')
                   storePassword System.getenv('KEYSTORE_PASSWORD')
@@ -312,18 +360,19 @@ jobs:
               }
           """
 
-          data = data.replace(
-              "signingConfigs {",
-              "signingConfigs {" + signing_block,
-              1
-          )
+          if "storeFile file('upload-keystore.jks')" not in text:
+              text = text.replace(
+                  "signingConfigs {",
+                  "signingConfigs {" + release_block,
+                  1
+              )
 
-          data = data.replace(
+          text = text.replace(
               "signingConfig signingConfigs.debug",
               "signingConfig signingConfigs.release"
           )
 
-          p.write_text(data)
+          path.write_text(text)
           PY
 
       - name: Build Android App Bundle
@@ -341,3 +390,4 @@ jobs:
         with:
           name: app-release-bundle-v15
           path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab
+```

@@ -1,4 +1,5 @@
 name: Build Vyapar Khata AAB
+
 on:
   workflow_dispatch:
 
@@ -8,39 +9,38 @@ jobs:
 
     steps:
 
-      - name: Set up Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: 20
 
-      - name: Set up JDK 17
+      - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: "temurin"
+          distribution: temurin
           java-version: "17"
 
-      - name: Create Vyapar Khata Project
-        shell: bash
+      - name: Create Vyapar Khata App
         run: |
           npx --yes create-expo-app@latest vyapar-khata --template blank --no-install
           cd vyapar-khata
 
           npm install
 
-          node <<'NODE'
+          node - <<'NODE'
           const fs = require("fs");
 
           const app = JSON.parse(
             fs.readFileSync("app.json", "utf8")
           );
 
-          app.expo.name = "Vyapar Khata Book";
+          app.expo.name = "Vyapar Khata";
           app.expo.slug = "vyapar-khata";
-          app.expo.version = "1.0.10";
+          app.expo.version = "1.0.16";
 
           app.expo.android = {
             package: "com.vyapar.khatabook.free",
-            versionCode: 15
+            versionCode: 16
           };
 
           fs.writeFileSync(
@@ -50,7 +50,7 @@ jobs:
           NODE
 
           cat > App.js <<'EOF'
-          import React, { useState } from "react";
+          import React, { useMemo, useState } from "react";
           import {
             StyleSheet,
             Text,
@@ -60,114 +60,205 @@ jobs:
             FlatList,
             SafeAreaView,
             StatusBar,
-            Alert
+            Alert,
+            ScrollView
           } from "react-native";
 
           export default function App() {
 
             const [customers, setCustomers] = useState([
               {
-                id: "1",
+                id: "c1",
                 name: "Ramesh Kumar",
-                balance: -500
+                balance: 500
               },
               {
-                id: "2",
+                id: "c2",
                 name: "Suresh Patel",
                 balance: 1200
-              },
-              {
-                id: "3",
-                name: "Mohan Sharma",
-                balance: 0
               }
             ]);
+
+            const [suppliers, setSuppliers] = useState([
+              {
+                id: "s1",
+                name: "ABC Traders",
+                balance: 800
+              },
+              {
+                id: "s2",
+                name: "Sharma Suppliers",
+                balance: 1500
+              }
+            ]);
+
+            const [activeTab, setActiveTab] =
+              useState("customers");
 
             const [name, setName] = useState("");
             const [amount, setAmount] = useState("");
 
-            const addTransaction = (type) => {
+            const currentList =
+              activeTab === "customers"
+                ? customers
+                : suppliers;
 
-              if (!name.trim() || !amount.trim()) {
+            const customerTotal = useMemo(() => {
+              return customers.reduce(
+                (sum, item) => sum + item.balance,
+                0
+              );
+            }, [customers]);
+
+            const supplierTotal = useMemo(() => {
+              return suppliers.reduce(
+                (sum, item) => sum + item.balance,
+                0
+              );
+            }, [suppliers]);
+
+            const saveEntry = (type) => {
+
+              if (!name.trim()) {
                 Alert.alert(
-                  "Error",
-                  "Kripya customer ka naam aur amount bharein"
+                  "Missing Name",
+                  "Please enter a name."
                 );
                 return;
               }
 
-              const amt = parseFloat(amount);
-
-              if (isNaN(amt) || amt <= 0) {
+              if (!amount.trim()) {
                 Alert.alert(
-                  "Error",
-                  "Sahi amount dalein"
+                  "Missing Amount",
+                  "Please enter an amount."
                 );
                 return;
               }
+
+              const value = Number(amount);
+
+              if (!Number.isFinite(value) || value <= 0) {
+                Alert.alert(
+                  "Invalid Amount",
+                  "Please enter a valid amount."
+                );
+                return;
+              }
+
+              const list =
+                activeTab === "customers"
+                  ? customers
+                  : suppliers;
+
+              const index = list.findIndex(
+                item =>
+                  item.name.toLowerCase() ===
+                  name.trim().toLowerCase()
+              );
 
               const change =
-                type === "jama"
-                  ? amt
-                  : -amt;
+                type === "add"
+                  ? value
+                  : -value;
 
-              const customerName =
-                name.trim().toLowerCase();
+              const updated = [...list];
 
-              const existingIndex =
-                customers.findIndex(
-                  customer =>
-                    customer.name.toLowerCase() === customerName
-                );
+              if (index >= 0) {
 
-              if (existingIndex >= 0) {
-
-                const updatedCustomers =
-                  [...customers];
-
-                updatedCustomers[
-                  existingIndex
-                ] = {
-                  ...updatedCustomers[existingIndex],
+                updated[index] = {
+                  ...updated[index],
                   balance:
-                    updatedCustomers[
-                      existingIndex
-                    ].balance + change
+                    updated[index].balance + change
                 };
-
-                setCustomers(updatedCustomers);
 
               } else {
 
-                const newCustomer = {
+                updated.unshift({
                   id: Date.now().toString(),
                   name: name.trim(),
                   balance: change
-                };
+                });
 
-                setCustomers([
-                  newCustomer,
-                  ...customers
-                ]);
+              }
+
+              if (activeTab === "customers") {
+                setCustomers(updated);
+              } else {
+                setSuppliers(updated);
               }
 
               setName("");
               setAmount("");
 
               Alert.alert(
-                "Success",
-                type === "jama"
-                  ? "Jama (Credit) jud gaya!"
-                  : "Udhar (Debit) jud gaya!"
+                "Entry Saved",
+                activeTab === "customers"
+                  ? "Customer account updated."
+                  : "Supplier account updated."
               );
             };
 
-            const totalBalance =
-              customers.reduce(
-                (total, customer) =>
-                  total + customer.balance,
-                0
+            const renderAccount = ({ item }) => {
+
+              const positive =
+                item.balance >= 0;
+
+              return (
+                <View style={styles.accountCard}>
+
+                  <View style={styles.accountLeft}>
+
+                    <Text style={styles.accountName}>
+                      {item.name}
+                    </Text>
+
+                    <Text style={styles.accountSub}>
+                      {activeTab === "customers"
+                        ? positive
+                          ? "Amount Receivable"
+                          : "Credit Balance"
+                        : positive
+                          ? "Amount Payable"
+                          : "Advance Paid"}
+                    </Text>
+
+                  </View>
+
+                  <View style={styles.accountRight}>
+
+                    <Text
+                      style={[
+                        styles.accountAmount,
+                        {
+                          color:
+                            activeTab === "customers"
+                              ? positive
+                                ? "#2e7d32"
+                                : "#c62828"
+                              : positive
+                                ? "#c62828"
+                                : "#2e7d32"
+                        }
+                      ]}
+                    >
+                      ₹ {Math.abs(item.balance)}
+                    </Text>
+
+                    <Text style={styles.accountStatus}>
+                      {activeTab === "customers"
+                        ? positive
+                          ? "To Receive"
+                          : "Adjusted"
+                        : positive
+                          ? "To Pay"
+                          : "Adjusted"}
+                    </Text>
+
+                  </View>
+
+                </View>
               );
+            };
 
             return (
               <SafeAreaView style={styles.container}>
@@ -177,165 +268,198 @@ jobs:
                   backgroundColor="#1a237e"
                 />
 
-                <View style={styles.header}>
+                <ScrollView>
 
-                  <Text style={styles.headerTitle}>
-                    व्यापार खाता
-                  </Text>
+                  <View style={styles.header}>
 
-                  <Text style={styles.headerSubtitle}>
-                    Vyapar Khata • Digital Bahi Khata
-                  </Text>
+                    <Text style={styles.headerTitle}>
+                      Vyapar Khata
+                    </Text>
 
-                </View>
+                    <Text style={styles.headerSubtitle}>
+                      Digital Business Ledger
+                    </Text>
 
-                <View style={styles.card}>
+                  </View>
 
-                  <Text style={styles.cardLabel}>
-                    Kul Bakaya / Net Balance
-                  </Text>
+                  <View style={styles.summaryRow}>
 
-                  <Text
-                    style={[
-                      styles.cardValue,
-                      {
-                        color:
-                          totalBalance >= 0
-                            ? "#2e7d32"
-                            : "#c62828"
-                      }
-                    ]}
-                  >
-                    ₹ {Math.abs(totalBalance)}
-                  </Text>
+                    <View style={styles.summaryCard}>
 
-                  <Text style={styles.balanceType}>
-                    {totalBalance >= 0
-                      ? "Lena hai"
-                      : "Dena hai"}
-                  </Text>
+                      <Text style={styles.summaryTitle}>
+                        Customers
+                      </Text>
 
-                </View>
+                      <Text style={styles.customerAmount}>
+                        ₹ {customerTotal}
+                      </Text>
 
-                <View style={styles.formContainer}>
+                      <Text style={styles.summaryLabel}>
+                        Receivable
+                      </Text>
 
-                  <Text style={styles.formTitle}>
-                    New Khata Entry
-                  </Text>
+                    </View>
 
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Customer Name"
-                    placeholderTextColor="#777"
-                    value={name}
-                    onChangeText={setName}
-                  />
+                    <View style={styles.summaryCard}>
 
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Amount (₹)"
-                    placeholderTextColor="#777"
-                    keyboardType="numeric"
-                    value={amount}
-                    onChangeText={setAmount}
-                  />
+                      <Text style={styles.summaryTitle}>
+                        Suppliers
+                      </Text>
 
-                  <View style={styles.buttonRow}>
+                      <Text style={styles.supplierAmount}>
+                        ₹ {supplierTotal}
+                      </Text>
+
+                      <Text style={styles.summaryLabel}>
+                        Payable
+                      </Text>
+
+                    </View>
+
+                  </View>
+
+                  <View style={styles.tabs}>
 
                     <TouchableOpacity
                       style={[
-                        styles.btn,
-                        styles.btnUdhar
+                        styles.tab,
+                        activeTab === "customers" &&
+                          styles.activeTab
                       ]}
                       onPress={() =>
-                        addTransaction("udhar")
+                        setActiveTab("customers")
                       }
                     >
-                      <Text style={styles.btnText}>
-                        - Diya (Udhar)
+                      <Text
+                        style={[
+                          styles.tabText,
+                          activeTab === "customers" &&
+                            styles.activeTabText
+                        ]}
+                      >
+                        Customers
                       </Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
                       style={[
-                        styles.btn,
-                        styles.btnJama
+                        styles.tab,
+                        activeTab === "suppliers" &&
+                          styles.activeTab
                       ]}
                       onPress={() =>
-                        addTransaction("jama")
+                        setActiveTab("suppliers")
                       }
                     >
-                      <Text style={styles.btnText}>
-                        + Mila (Jama)
+                      <Text
+                        style={[
+                          styles.tabText,
+                          activeTab === "suppliers" &&
+                            styles.activeTabText
+                        ]}
+                      >
+                        Suppliers
                       </Text>
                     </TouchableOpacity>
 
                   </View>
 
-                </View>
+                  <View style={styles.form}>
 
-                <View style={styles.listHeader}>
+                    <Text style={styles.formTitle}>
+                      {activeTab === "customers"
+                        ? "Customer Entry"
+                        : "Supplier Entry"}
+                    </Text>
 
-                  <Text style={styles.listTitle}>
-                    Customer Accounts
-                  </Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder={
+                        activeTab === "customers"
+                          ? "Customer Name"
+                          : "Supplier Name"
+                      }
+                      placeholderTextColor="#777"
+                      value={name}
+                      onChangeText={setName}
+                    />
 
-                  <Text style={styles.listSub}>
-                    {customers.length} Grahak
-                  </Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Amount (₹)"
+                      placeholderTextColor="#777"
+                      keyboardType="numeric"
+                      value={amount}
+                      onChangeText={setAmount}
+                    />
 
-                </View>
+                    <View style={styles.buttonRow}>
 
-                <FlatList
-                  data={customers}
-                  keyExtractor={item => item.id}
-                  contentContainerStyle={
-                    styles.listContainer
-                  }
-                  renderItem={({ item }) => (
-
-                    <View style={styles.listItem}>
-
-                      <View style={styles.customerInfo}>
-
-                        <Text style={styles.itemName}>
-                          {item.name}
+                      <TouchableOpacity
+                        style={[
+                          styles.actionButton,
+                          styles.minusButton
+                        ]}
+                        onPress={() =>
+                          saveEntry("subtract")
+                        }
+                      >
+                        <Text style={styles.buttonText}>
+                          − Payment
                         </Text>
+                      </TouchableOpacity>
 
-                        <Text style={styles.itemDate}>
-                          Account
+                      <TouchableOpacity
+                        style={[
+                          styles.actionButton,
+                          styles.plusButton
+                        ]}
+                        onPress={() =>
+                          saveEntry("add")
+                        }
+                      >
+                        <Text style={styles.buttonText}>
+                          + Entry
                         </Text>
-
-                      </View>
-
-                      <View style={styles.amountBox}>
-
-                        <Text
-                          style={[
-                            styles.itemAmount,
-                            {
-                              color:
-                                item.balance >= 0
-                                  ? "#2e7d32"
-                                  : "#c62828"
-                            }
-                          ]}
-                        >
-                          ₹ {Math.abs(item.balance)}
-                        </Text>
-
-                        <Text style={styles.itemType}>
-                          {item.balance >= 0
-                            ? "Mileni hai"
-                            : "Dene hain"}
-                        </Text>
-
-                      </View>
+                      </TouchableOpacity>
 
                     </View>
 
-                  )}
-                />
+                  </View>
+
+                  <View style={styles.listHeader}>
+
+                    <Text style={styles.listTitle}>
+                      {activeTab === "customers"
+                        ? "Customer Accounts"
+                        : "Supplier Accounts"}
+                    </Text>
+
+                    <Text style={styles.listCount}>
+                      {currentList.length} Accounts
+                    </Text>
+
+                  </View>
+
+                  <FlatList
+                    data={currentList}
+                    scrollEnabled={false}
+                    keyExtractor={item => item.id}
+                    renderItem={renderAccount}
+                    contentContainerStyle={
+                      styles.listContainer
+                    }
+                  />
+
+                  <View style={styles.footer}>
+
+                    <Text style={styles.footerText}>
+                      Vyapar Khata • Business Accounting
+                    </Text>
+
+                  </View>
+
+                </ScrollView>
 
               </SafeAreaView>
             );
@@ -350,100 +474,141 @@ jobs:
 
             header: {
               backgroundColor: "#1a237e",
-              paddingVertical: 18,
-              paddingHorizontal: 16,
+              paddingVertical: 20,
               alignItems: "center"
             },
 
             headerTitle: {
-              color: "#fff",
-              fontSize: 23,
+              color: "#ffffff",
+              fontSize: 28,
               fontWeight: "bold"
             },
 
             headerSubtitle: {
               color: "#c5cae9",
-              fontSize: 13,
+              fontSize: 14,
               marginTop: 4
             },
 
-            card: {
-              backgroundColor: "#fff",
-              marginHorizontal: 16,
-              marginTop: 12,
-              padding: 18,
-              borderRadius: 12,
-              elevation: 3,
-              alignItems: "center"
+            summaryRow: {
+              flexDirection: "row",
+              paddingHorizontal: 12,
+              marginTop: 12
             },
 
-            cardLabel: {
-              color: "#666",
-              fontSize: 13,
+            summaryCard: {
+              flex: 1,
+              backgroundColor: "#ffffff",
+              marginHorizontal: 5,
+              padding: 15,
+              borderRadius: 12,
+              elevation: 3
+            },
+
+            summaryTitle: {
+              fontSize: 15,
+              fontWeight: "bold",
+              color: "#333333"
+            },
+
+            customerAmount: {
+              color: "#2e7d32",
+              fontSize: 22,
+              fontWeight: "bold",
+              marginTop: 7
+            },
+
+            supplierAmount: {
+              color: "#c62828",
+              fontSize: 22,
+              fontWeight: "bold",
+              marginTop: 7
+            },
+
+            summaryLabel: {
+              color: "#777777",
+              fontSize: 12,
+              marginTop: 3
+            },
+
+            tabs: {
+              flexDirection: "row",
+              backgroundColor: "#ffffff",
+              margin: 16,
+              padding: 4,
+              borderRadius: 10,
+              elevation: 2
+            },
+
+            tab: {
+              flex: 1,
+              paddingVertical: 12,
+              alignItems: "center",
+              borderRadius: 8
+            },
+
+            activeTab: {
+              backgroundColor: "#1a237e"
+            },
+
+            tabText: {
+              color: "#555555",
               fontWeight: "600"
             },
 
-            cardValue: {
-              fontSize: 27,
-              fontWeight: "bold",
-              marginTop: 5
+            activeTabText: {
+              color: "#ffffff"
             },
 
-            balanceType: {
-              color: "#777",
-              fontSize: 12,
-              marginTop: 2
-            },
-
-            formContainer: {
-              backgroundColor: "#fff",
-              margin: 16,
-              padding: 14,
+            form: {
+              backgroundColor: "#ffffff",
+              marginHorizontal: 16,
+              marginBottom: 16,
+              padding: 15,
               borderRadius: 12,
               elevation: 3
             },
 
             formTitle: {
-              fontSize: 17,
+              fontSize: 19,
               fontWeight: "bold",
-              color: "#333",
-              marginBottom: 10
+              color: "#333333",
+              marginBottom: 12
             },
 
             input: {
               backgroundColor: "#f9f9f9",
               borderWidth: 1,
-              borderColor: "#ddd",
+              borderColor: "#dddddd",
               borderRadius: 8,
-              padding: 11,
-              fontSize: 15,
+              padding: 12,
+              fontSize: 16,
               marginBottom: 10
             },
 
             buttonRow: {
-              flexDirection: "row",
-              justifyContent: "space-between"
+              flexDirection: "row"
             },
 
-            btn: {
+            actionButton: {
               flex: 1,
-              paddingVertical: 13,
+              paddingVertical: 14,
               borderRadius: 8,
               alignItems: "center"
             },
 
-            btnUdhar: {
-              backgroundColor: "#d32f2f",
+            minusButton: {
+              backgroundColor: "#c62828",
               marginRight: 5
             },
 
-            btnJama: {
+            plusButton: {
               backgroundColor: "#2e7d32",
               marginLeft: 5
             },
 
-            btnText: {
-              color: "#fff",
+            buttonText: {
+              color: "#ffffff",
               fontWeight: "bold",
               fontSize: 14
             },
@@ -452,64 +617,74 @@ jobs:
               flexDirection: "row",
               justifyContent: "space-between",
               paddingHorizontal: 18,
-              marginBottom: 6
+              marginBottom: 8
             },
 
             listTitle: {
-              fontSize: 17,
+              fontSize: 18,
               fontWeight: "bold",
-              color: "#333"
+              color: "#333333"
             },
 
-            listSub: {
+            listCount: {
               fontSize: 13,
-              color: "#777"
+              color: "#777777"
             },
 
             listContainer: {
-              paddingBottom: 20
+              paddingBottom: 10
             },
 
-            listItem: {
-              backgroundColor: "#fff",
+            accountCard: {
+              backgroundColor: "#ffffff",
               marginHorizontal: 16,
-              marginBottom: 8,
-              padding: 14,
-              borderRadius: 9,
+              marginBottom: 9,
+              padding: 15,
+              borderRadius: 10,
               flexDirection: "row",
               justifyContent: "space-between",
-              elevation: 1
+              elevation: 2
             },
 
-            customerInfo: {
+            accountLeft: {
               flex: 1
             },
 
-            itemName: {
-              fontSize: 16,
+            accountName: {
+              fontSize: 17,
               fontWeight: "600",
-              color: "#222"
+              color: "#222222"
             },
 
-            itemDate: {
+            accountSub: {
               fontSize: 12,
-              color: "#888",
-              marginTop: 3
+              color: "#777777",
+              marginTop: 5
             },
 
-            amountBox: {
+            accountRight: {
               alignItems: "flex-end"
             },
 
-            itemAmount: {
-              fontSize: 17,
+            accountAmount: {
+              fontSize: 18,
               fontWeight: "bold"
             },
 
-            itemType: {
+            accountStatus: {
               fontSize: 11,
-              color: "#666",
-              marginTop: 2
+              color: "#777777",
+              marginTop: 3
+            },
+
+            footer: {
+              padding: 20,
+              alignItems: "center"
+            },
+
+            footerText: {
+              color: "#888888",
+              fontSize: 12
             }
 
           });
@@ -517,47 +692,55 @@ jobs:
 
           npx expo prebuild --platform android --no-install
 
-      - name: Restore Upload Keystore
+      - name: Restore Existing Upload Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        shell: bash
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "KEYSTORE_BASE64 secret is missing"
+            echo "ERROR: KEYSTORE_BASE64 secret is missing."
             exit 1
           fi
 
           echo "$KEYSTORE_BASE64" | base64 --decode > \
             vyapar-khata/android/app/upload-keystore.jks
 
+          test -s vyapar-khata/android/app/upload-keystore.jks
+
       - name: Configure Release Signing
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        shell: bash
         run: |
           cd vyapar-khata/android
 
-          python3 <<'PY'
+          python3 - <<'PY'
           from pathlib import Path
 
           path = Path("app/build.gradle")
           text = path.read_text()
 
           if "upload-keystore.jks" not in text:
+
               signing = """
                   release {
                       storeFile file('upload-keystore.jks')
-                      storePassword System.getenv('KEYSTORE_PASSWORD')
-                      keyAlias System.getenv('KEY_ALIAS')
-                      keyPassword System.getenv('KEY_PASSWORD')
+                      storePassword System.getenv("KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("KEY_ALIAS")
+                      keyPassword System.getenv("KEY_PASSWORD")
                   }
               """
 
+              marker = "signingConfigs {"
+
+              if marker not in text:
+                  raise SystemExit(
+                      "Could not find signingConfigs block."
+                  )
+
               text = text.replace(
-                  "signingConfigs {",
-                  "signingConfigs {" + signing,
+                  marker,
+                  marker + signing,
                   1
               )
 
@@ -569,21 +752,18 @@ jobs:
           path.write_text(text)
           PY
 
-      - name: Build AAB
+      - name: Build Release AAB
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        shell: bash
         run: |
           cd vyapar-khata/android
-
           chmod +x gradlew
-
           ./gradlew bundleRelease --no-daemon
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: vyapar-khata-v15
+          name: vyapar-khata-v16-aab
           path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab

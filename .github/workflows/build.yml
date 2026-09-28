@@ -1,6 +1,4 @@
-```yaml
 name: Build Vyapar Khata AAB
-
 on:
   workflow_dispatch:
 
@@ -13,22 +11,21 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "20"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
+          distribution: "temurin"
           java-version: "17"
 
-      - name: Create Vyapar Khata App
+      - name: Create Vyapar Khata Project
         shell: bash
         run: |
           npx --yes create-expo-app@latest vyapar-khata --template blank --no-install
           cd vyapar-khata
 
           npm install
-          npx expo install react-native-webview
 
           node <<'NODE'
           const fs = require("fs");
@@ -53,264 +50,291 @@ jobs:
           NODE
 
           cat > App.js <<'EOF'
-          import React from "react";
+          import React, { useState } from "react";
           import {
+            StyleSheet,
+            Text,
+            View,
+            TextInput,
+            TouchableOpacity,
+            FlatList,
             SafeAreaView,
             StatusBar,
-            StyleSheet
+            Alert
           } from "react-native";
-          import { WebView } from "react-native-webview";
-
-          const html = `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta name="viewport"
-                  content="width=device-width, initial-scale=1.0">
-
-            <style>
-              * {
-                box-sizing: border-box;
-              }
-
-              body {
-                margin: 0;
-                font-family: Arial, sans-serif;
-                background: #f4f7fb;
-                color: #172033;
-              }
-
-              .top {
-                background: #1261d8;
-                color: white;
-                padding: 25px 18px 28px;
-                border-radius: 0 0 25px 25px;
-              }
-
-              .title {
-                font-size: 25px;
-                font-weight: bold;
-              }
-
-              .sub {
-                font-size: 14px;
-                margin-top: 6px;
-              }
-
-              .cards {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 12px;
-                padding: 16px;
-              }
-
-              .card {
-                background: white;
-                border-radius: 17px;
-                padding: 17px;
-              }
-
-              .label {
-                font-size: 13px;
-                color: #697386;
-              }
-
-              .amount {
-                font-size: 21px;
-                font-weight: bold;
-                margin-top: 7px;
-              }
-
-              .receive {
-                color: #078447;
-              }
-
-              .pay {
-                color: #d34a4a;
-              }
-
-              .section {
-                padding: 8px 16px;
-                font-size: 19px;
-                font-weight: bold;
-              }
-
-              .actions {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 12px;
-                padding: 12px 16px 18px;
-              }
-
-              button {
-                border: 0;
-                padding: 16px 8px;
-                border-radius: 15px;
-                font-size: 15px;
-                font-weight: bold;
-              }
-
-              .add {
-                background: #1261d8;
-                color: white;
-              }
-
-              .view {
-                background: white;
-                color: #1261d8;
-              }
-
-              .customer {
-                background: white;
-                margin: 8px 16px;
-                padding: 16px;
-                border-radius: 16px;
-                display: flex;
-                justify-content: space-between;
-              }
-
-              .name {
-                font-weight: bold;
-                font-size: 16px;
-              }
-
-              .phone {
-                font-size: 12px;
-                color: #7b8494;
-                margin-top: 5px;
-              }
-
-              .bal {
-                font-weight: bold;
-                color: #078447;
-              }
-
-              .bottom {
-                height: 65px;
-                background: white;
-                display: flex;
-                justify-content: space-around;
-                align-items: center;
-                margin-top: 18px;
-              }
-
-              .nav {
-                text-align: center;
-                font-size: 12px;
-                color: #647084;
-              }
-
-              .active {
-                color: #1261d8;
-                font-weight: bold;
-              }
-            </style>
-          </head>
-
-          <body>
-
-            <div class="top">
-              <div class="title">Vyapar Khata Book</div>
-              <div class="sub">
-                Manage your business accounts easily
-              </div>
-            </div>
-
-            <div class="cards">
-
-              <div class="card">
-                <div class="label">You will receive</div>
-                <div class="amount receive">₹25,450</div>
-              </div>
-
-              <div class="card">
-                <div class="label">You will pay</div>
-                <div class="amount pay">₹8,750</div>
-              </div>
-
-            </div>
-
-            <div class="section">
-              Quick Actions
-            </div>
-
-            <div class="actions">
-
-              <button class="add"
-                onclick="alert('Add Customer')">
-                + Add Customer
-              </button>
-
-              <button class="view"
-                onclick="alert('New Entry')">
-                + New Entry
-              </button>
-
-              <button class="view"
-                onclick="alert('Customers')">
-                Customers
-              </button>
-
-              <button class="view"
-                onclick="alert('Reports')">
-                Reports
-              </button>
-
-            </div>
-
-            <div class="section">
-              Recent Customers
-            </div>
-
-            <div class="customer">
-              <div>
-                <div class="name">Rahul Traders</div>
-                <div class="phone">98765 43210</div>
-              </div>
-              <div class="bal">₹12,500</div>
-            </div>
-
-            <div class="customer">
-              <div>
-                <div class="name">Amit Enterprises</div>
-                <div class="phone">98765 12345</div>
-              </div>
-              <div class="bal">₹7,950</div>
-            </div>
-
-            <div class="customer">
-              <div>
-                <div class="name">Sharma Store</div>
-                <div class="phone">99887 66554</div>
-              </div>
-              <div class="bal">₹5,000</div>
-            </div>
-
-            <div class="bottom">
-              <div class="nav active">Home</div>
-              <div class="nav">Customers</div>
-              <div class="nav">Khata</div>
-              <div class="nav">Reports</div>
-            </div>
-
-          </body>
-          </html>
-          `;
 
           export default function App() {
+
+            const [customers, setCustomers] = useState([
+              {
+                id: "1",
+                name: "Ramesh Kumar",
+                balance: -500
+              },
+              {
+                id: "2",
+                name: "Suresh Patel",
+                balance: 1200
+              },
+              {
+                id: "3",
+                name: "Mohan Sharma",
+                balance: 0
+              }
+            ]);
+
+            const [name, setName] = useState("");
+            const [amount, setAmount] = useState("");
+
+            const addTransaction = (type) => {
+
+              if (!name.trim() || !amount.trim()) {
+                Alert.alert(
+                  "Error",
+                  "Kripya customer ka naam aur amount bharein"
+                );
+                return;
+              }
+
+              const amt = parseFloat(amount);
+
+              if (isNaN(amt) || amt <= 0) {
+                Alert.alert(
+                  "Error",
+                  "Sahi amount dalein"
+                );
+                return;
+              }
+
+              const change =
+                type === "jama"
+                  ? amt
+                  : -amt;
+
+              const customerName =
+                name.trim().toLowerCase();
+
+              const existingIndex =
+                customers.findIndex(
+                  customer =>
+                    customer.name.toLowerCase() === customerName
+                );
+
+              if (existingIndex >= 0) {
+
+                const updatedCustomers =
+                  [...customers];
+
+                updatedCustomers[
+                  existingIndex
+                ] = {
+                  ...updatedCustomers[existingIndex],
+                  balance:
+                    updatedCustomers[
+                      existingIndex
+                    ].balance + change
+                };
+
+                setCustomers(updatedCustomers);
+
+              } else {
+
+                const newCustomer = {
+                  id: Date.now().toString(),
+                  name: name.trim(),
+                  balance: change
+                };
+
+                setCustomers([
+                  newCustomer,
+                  ...customers
+                ]);
+              }
+
+              setName("");
+              setAmount("");
+
+              Alert.alert(
+                "Success",
+                type === "jama"
+                  ? "Jama (Credit) jud gaya!"
+                  : "Udhar (Debit) jud gaya!"
+              );
+            };
+
+            const totalBalance =
+              customers.reduce(
+                (total, customer) =>
+                  total + customer.balance,
+                0
+              );
+
             return (
               <SafeAreaView style={styles.container}>
 
                 <StatusBar
                   barStyle="light-content"
-                  backgroundColor="#1261d8"
+                  backgroundColor="#1a237e"
                 />
 
-                <WebView
-                  source={{ html }}
-                  style={styles.webview}
-                  javaScriptEnabled={true}
-                  domStorageEnabled={true}
+                <View style={styles.header}>
+
+                  <Text style={styles.headerTitle}>
+                    व्यापार खाता
+                  </Text>
+
+                  <Text style={styles.headerSubtitle}>
+                    Vyapar Khata • Digital Bahi Khata
+                  </Text>
+
+                </View>
+
+                <View style={styles.card}>
+
+                  <Text style={styles.cardLabel}>
+                    Kul Bakaya / Net Balance
+                  </Text>
+
+                  <Text
+                    style={[
+                      styles.cardValue,
+                      {
+                        color:
+                          totalBalance >= 0
+                            ? "#2e7d32"
+                            : "#c62828"
+                      }
+                    ]}
+                  >
+                    ₹ {Math.abs(totalBalance)}
+                  </Text>
+
+                  <Text style={styles.balanceType}>
+                    {totalBalance >= 0
+                      ? "Lena hai"
+                      : "Dena hai"}
+                  </Text>
+
+                </View>
+
+                <View style={styles.formContainer}>
+
+                  <Text style={styles.formTitle}>
+                    New Khata Entry
+                  </Text>
+
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Customer Name"
+                    placeholderTextColor="#777"
+                    value={name}
+                    onChangeText={setName}
+                  />
+
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Amount (₹)"
+                    placeholderTextColor="#777"
+                    keyboardType="numeric"
+                    value={amount}
+                    onChangeText={setAmount}
+                  />
+
+                  <View style={styles.buttonRow}>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.btn,
+                        styles.btnUdhar
+                      ]}
+                      onPress={() =>
+                        addTransaction("udhar")
+                      }
+                    >
+                      <Text style={styles.btnText}>
+                        - Diya (Udhar)
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.btn,
+                        styles.btnJama
+                      ]}
+                      onPress={() =>
+                        addTransaction("jama")
+                      }
+                    >
+                      <Text style={styles.btnText}>
+                        + Mila (Jama)
+                      </Text>
+                    </TouchableOpacity>
+
+                  </View>
+
+                </View>
+
+                <View style={styles.listHeader}>
+
+                  <Text style={styles.listTitle}>
+                    Customer Accounts
+                  </Text>
+
+                  <Text style={styles.listSub}>
+                    {customers.length} Grahak
+                  </Text>
+
+                </View>
+
+                <FlatList
+                  data={customers}
+                  keyExtractor={item => item.id}
+                  contentContainerStyle={
+                    styles.listContainer
+                  }
+                  renderItem={({ item }) => (
+
+                    <View style={styles.listItem}>
+
+                      <View style={styles.customerInfo}>
+
+                        <Text style={styles.itemName}>
+                          {item.name}
+                        </Text>
+
+                        <Text style={styles.itemDate}>
+                          Account
+                        </Text>
+
+                      </View>
+
+                      <View style={styles.amountBox}>
+
+                        <Text
+                          style={[
+                            styles.itemAmount,
+                            {
+                              color:
+                                item.balance >= 0
+                                  ? "#2e7d32"
+                                  : "#c62828"
+                            }
+                          ]}
+                        >
+                          ₹ {Math.abs(item.balance)}
+                        </Text>
+
+                        <Text style={styles.itemType}>
+                          {item.balance >= 0
+                            ? "Mileni hai"
+                            : "Dene hain"}
+                        </Text>
+
+                      </View>
+
+                    </View>
+
+                  )}
                 />
 
               </SafeAreaView>
@@ -318,25 +342,195 @@ jobs:
           }
 
           const styles = StyleSheet.create({
+
             container: {
               flex: 1,
-              backgroundColor: "#f4f7fb"
+              backgroundColor: "#f4f6f8"
             },
-            webview: {
+
+            header: {
+              backgroundColor: "#1a237e",
+              paddingVertical: 18,
+              paddingHorizontal: 16,
+              alignItems: "center"
+            },
+
+            headerTitle: {
+              color: "#fff",
+              fontSize: 23,
+              fontWeight: "bold"
+            },
+
+            headerSubtitle: {
+              color: "#c5cae9",
+              fontSize: 13,
+              marginTop: 4
+            },
+
+            card: {
+              backgroundColor: "#fff",
+              marginHorizontal: 16,
+              marginTop: 12,
+              padding: 18,
+              borderRadius: 12,
+              elevation: 3,
+              alignItems: "center"
+            },
+
+            cardLabel: {
+              color: "#666",
+              fontSize: 13,
+              fontWeight: "600"
+            },
+
+            cardValue: {
+              fontSize: 27,
+              fontWeight: "bold",
+              marginTop: 5
+            },
+
+            balanceType: {
+              color: "#777",
+              fontSize: 12,
+              marginTop: 2
+            },
+
+            formContainer: {
+              backgroundColor: "#fff",
+              margin: 16,
+              padding: 14,
+              borderRadius: 12,
+              elevation: 3
+            },
+
+            formTitle: {
+              fontSize: 17,
+              fontWeight: "bold",
+              color: "#333",
+              marginBottom: 10
+            },
+
+            input: {
+              backgroundColor: "#f9f9f9",
+              borderWidth: 1,
+              borderColor: "#ddd",
+              borderRadius: 8,
+              padding: 11,
+              fontSize: 15,
+              marginBottom: 10
+            },
+
+            buttonRow: {
+              flexDirection: "row",
+              justifyContent: "space-between"
+            },
+
+            btn: {
+              flex: 1,
+              paddingVertical: 13,
+              borderRadius: 8,
+              alignItems: "center"
+            },
+
+            btnUdhar: {
+              backgroundColor: "#d32f2f",
+              marginRight: 5
+            },
+
+            btnJama: {
+              backgroundColor: "#2e7d32",
+              marginLeft: 5
+            },
+
+            btnText: {
+              color: "#fff",
+              fontWeight: "bold",
+              fontSize: 14
+            },
+
+            listHeader: {
+              flexDirection: "row",
+              justifyContent: "space-between",
+              paddingHorizontal: 18,
+              marginBottom: 6
+            },
+
+            listTitle: {
+              fontSize: 17,
+              fontWeight: "bold",
+              color: "#333"
+            },
+
+            listSub: {
+              fontSize: 13,
+              color: "#777"
+            },
+
+            listContainer: {
+              paddingBottom: 20
+            },
+
+            listItem: {
+              backgroundColor: "#fff",
+              marginHorizontal: 16,
+              marginBottom: 8,
+              padding: 14,
+              borderRadius: 9,
+              flexDirection: "row",
+              justifyContent: "space-between",
+              elevation: 1
+            },
+
+            customerInfo: {
               flex: 1
+            },
+
+            itemName: {
+              fontSize: 16,
+              fontWeight: "600",
+              color: "#222"
+            },
+
+            itemDate: {
+              fontSize: 12,
+              color: "#888",
+              marginTop: 3
+            },
+
+            amountBox: {
+              alignItems: "flex-end"
+            },
+
+            itemAmount: {
+              fontSize: 17,
+              fontWeight: "bold"
+            },
+
+            itemType: {
+              fontSize: 11,
+              color: "#666",
+              marginTop: 2
             }
+
           });
           EOF
 
-          CI=1 npx expo prebuild --platform android --no-install
+          npx expo prebuild --platform android --no-install
 
-      - name: Restore Permanent Upload Keystore
+      - name: Restore Upload Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        shell: bash
         run: |
-          echo "$KEYSTORE_BASE64" | base64 --decode > vyapar-khata/android/app/upload-keystore.jks
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "KEYSTORE_BASE64 secret is missing"
+            exit 1
+          fi
 
-      - name: Configure Permanent Gradle Signing
+          echo "$KEYSTORE_BASE64" | base64 --decode > \
+            vyapar-khata/android/app/upload-keystore.jks
+
+      - name: Configure Release Signing
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -351,19 +545,19 @@ jobs:
           path = Path("app/build.gradle")
           text = path.read_text()
 
-          release_block = """
-              release {
-                  storeFile file('upload-keystore.jks')
-                  storePassword System.getenv('KEYSTORE_PASSWORD')
-                  keyAlias System.getenv('KEY_ALIAS')
-                  keyPassword System.getenv('KEY_PASSWORD')
-              }
-          """
+          if "upload-keystore.jks" not in text:
+              signing = """
+                  release {
+                      storeFile file('upload-keystore.jks')
+                      storePassword System.getenv('KEYSTORE_PASSWORD')
+                      keyAlias System.getenv('KEY_ALIAS')
+                      keyPassword System.getenv('KEY_PASSWORD')
+                  }
+              """
 
-          if "storeFile file('upload-keystore.jks')" not in text:
               text = text.replace(
                   "signingConfigs {",
-                  "signingConfigs {" + release_block,
+                  "signingConfigs {" + signing,
                   1
               )
 
@@ -375,19 +569,21 @@ jobs:
           path.write_text(text)
           PY
 
-      - name: Build Android App Bundle
+      - name: Build AAB
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        shell: bash
         run: |
           cd vyapar-khata/android
+
           chmod +x gradlew
+
           ./gradlew bundleRelease --no-daemon
 
-      - name: Upload AAB Artifact
+      - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-bundle-v15
+          name: vyapar-khata-v15
           path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab
-```

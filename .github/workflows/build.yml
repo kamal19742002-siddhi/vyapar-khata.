@@ -7,7 +7,9 @@ jobs:
 build:
 runs-on: ubuntu-latest
 
+```
 steps:
+
   - name: Setup Node
     uses: actions/setup-node@v4
     with:
@@ -407,6 +409,344 @@ steps:
               (person.entries || []).reduce(
                 (sum, entry) => {
                   if (entry.type === "Credit") {
+                    return sum + entry.amount;
+                  }
+
+                  return sum - entry.amount;
+                },
+                0
+              );
+
+            return total + personTotal;
+          }, 0);
+        };
+
+        const customerTotal =
+          totalForList(customers);
+
+        const supplierTotal =
+          totalForList(suppliers);
+
+        if (screen === "new") {
+          return (
+            <SafeAreaView style={styles.container}>
+              <StatusBar
+                barStyle="light-content"
+                backgroundColor="#0759a8"
+              />
+
+              <ScrollView
+                contentContainerStyle={styles.scroll}
+                keyboardShouldPersistTaps="handled"
+              >
+                <Header
+                  title={
+                    tab === "Customers"
+                      ? "New Customer"
+                      : "New Supplier"
+                  }
+                />
+
+                <View style={styles.formCard}>
+                  <Text style={styles.label}>
+                    Name *
+                  </Text>
+
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Customer / Supplier Name"
+                    value={name}
+                    onChangeText={setName}
+                  />
+
+                  <Text style={styles.label}>
+                    Phone Number
+                  </Text>
+
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Phone Number"
+                    keyboardType="phone-pad"
+                    value={phone}
+                    onChangeText={setPhone}
+                  />
+
+                  <Text style={styles.label}>
+                    GST Number
+                  </Text>
+
+                  <TextInput
+                    style={styles.input}
+                    placeholder="GST Number"
+                    value={gst}
+                    onChangeText={setGst}
+                    autoCapitalize="characters"
+                  />
+
+                  <Text style={styles.label}>
+                    Email ID
+                  </Text>
+
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Email ID"
+                    keyboardType="email-address"
+                    value={email}
+                    onChangeText={setEmail}
+                  />
+
+                  <Text style={styles.label}>
+                    Address
+                  </Text>
+
+                  <TextInput
+                    style={[
+                      styles.input,
+                      styles.addressInput
+                    ]}
+                    placeholder="Full Address"
+                    multiline
+                    value={address}
+                    onChangeText={setAddress}
+                  />
+
+                  <Button
+                    text="SAVE PROFILE"
+                    onPress={addPerson}
+                  />
+
+                  <Button
+                    text="CANCEL"
+                    secondary
+                    onPress={goHome}
+                  />
+                </View>
+              </ScrollView>
+            </SafeAreaView>
+          );
+        }
+
+        if (
+          screen === "profile" &&
+          selected
+        ) {
+          return (
+            <SafeAreaView style={styles.container}>
+              <StatusBar
+                barStyle="light-content"
+                backgroundColor="#0759a8"
+              />
+
+              <ScrollView
+                contentContainerStyle={styles.scroll}
+              >
+                <Header title="Profile" />
+
+                <View style={styles.profileCard}>
+                  <Text style={styles.profileName}>
+                    {selected.name}
+                  </Text>
+
+                  <Info
+                    title="Phone Number"
+                    value={selected.phone}
+                  />
+
+                  <Info
+                    title="GST Number"
+                    value={selected.gst}
+                  />
+
+                  <Info
+                    title="Email ID"
+                    value={selected.email}
+                  />
+
+                  <Info
+                    title="Address"
+                    value={selected.address}
+                  />
+                </View>
+
+                <View style={styles.formCard}>
+                  <Button
+                    text="OPEN PASSBOOK"
+                    onPress={() =>
+                      openPassbook(selected)
+                    }
+                  />
+
+                  <Button
+                    text="BACK"
+                    secondary
+                    onPress={goHome}
+                  />
+                </View>
+              </ScrollView>
+            </SafeAreaView>
+          );
+        }
+
+        if (
+          screen === "passbook" &&
+          selected
+        ) {
+          return (
+            <SafeAreaView style={styles.container}>
+              <StatusBar
+                barStyle="light-content"
+                backgroundColor="#0759a8"
+              />
+
+              <ScrollView
+                contentContainerStyle={styles.scroll}
+              >
+                <Header title="Passbook" />
+
+                <View style={styles.passbookHead}>
+                  <Text style={styles.profileName}>
+                    {selected.name}
+                  </Text>
+
+                  <Text style={styles.small}>
+                    {selected.phone ||
+                      "No phone number"}
+                  </Text>
+
+                  <Text style={styles.balance}>
+                    Balance: ₹
+                    {Math.abs(total).toLocaleString(
+                      "en-IN"
+                    )}
+                  </Text>
+
+                  <Text style={styles.balanceType}>
+                    {total >= 0
+                      ? "Credit Balance"
+                      : "Debit Balance"}
+                  </Text>
+                </View>
+
+                <View style={styles.formCard}>
+                  <Text style={styles.formTitle}>
+                    New Passbook Entry
+                  </Text>
+
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Invoice Number"
+                    value={invoiceNo}
+                    onChangeText={setInvoiceNo}
+                  />
+
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Invoice Date (DD/MM/YYYY)"
+                    value={invoiceDate}
+                    onChangeText={setInvoiceDate}
+                  />
+
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Amount (₹)"
+                    keyboardType="numeric"
+                    value={amount}
+                    onChangeText={setAmount}
+                  />
+
+                  <Text style={styles.label}>
+                    Transaction Type
+                  </Text>
+
+                  <View style={styles.row}>
+                    <TouchableOpacity
+                      style={[
+                        styles.choice,
+                        entryType === "Credit" &&
+                          styles.choiceActive
+                      ]}
+                      onPress={() =>
+                        setEntryType("Credit")
+                      }
+                    >
+                      <Text style={styles.choiceText}>
+                        + Jama
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.choice,
+                        entryType === "Debit" &&
+                          styles.choiceActive
+                      ]}
+                      onPress={() =>
+                        setEntryType("Debit")
+                      }
+                    >
+                      <Text style={styles.choiceText}>
+                        - Udhar
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={styles.label}>
+                    Mode of Payment
+                  </Text>
+
+                  <View style={styles.rowWrap}>
+                    {[
+                      "Cash",
+                      "UPI",
+                      "Bank",
+                      "Cheque",
+                      "Credit",
+                      "Other"
+                    ].map(mode => (
+                      <TouchableOpacity
+                        key={mode}
+                        style={[
+                          styles.payment,
+                          paymentMode === mode &&
+                            styles.paymentActive
+                        ]}
+                        onPress={() =>
+                          setPaymentMode(mode)
+                        }
+                      >
+                        <Text style={styles.paymentText}>
+                          {mode}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.attachButton}
+                    onPress={chooseAttachment}
+                  >
+                    <Text style={styles.attachText}>
+                      📎 Attach Invoice Copy
+                    </Text>
+                  </TouchableOpacity>
+
+                  {attachment && (
+                    <Text style={styles.selectedFile}>
+                      Selected: {attachment.name}
+                    </Text>
+                  )}
+
+                  <Button
+                    text="SAVE PASSBOOK ENTRY"
+                    onPress={addTransaction}
+                  />
+                </View>
+
+                <Text style={styles.sectionTitle}>
+                  Transaction History
+                </Text>
+
+                {(selected.entries || [])f (entry.type === "Credit") {
                     return sum + entry.amount;
                   }
 

@@ -1,12 +1,10 @@
 name: Build Vyapar Khata AAB
-
 on:
-workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
-build:
-runs-on: ubuntu-latest
-
+    build:
+  runs-on: ubuntu-latest
 steps:
 
   - name: Setup Node
@@ -1903,4 +1901,3 @@ steps:
       name: vyapar-khata-release-v30
       path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab
       if-no-files-found: error
-```

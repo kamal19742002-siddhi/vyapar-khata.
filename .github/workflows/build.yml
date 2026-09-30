@@ -514,8 +514,7 @@ jobs:
                         paymentRef: paymentRef.trim(),
                         type: entryType,
                         attachment: attachment ? attachment.name : null,
-                        attachmentUri: attachment ? attachment.uri : null
-    tMode("Cash");
+                        attachmentUri: attachment ? attachment.uri : nulltMode("Cash");
               setPaymentRef("");
               setEntryType("Credit");
               setAttachment(null);

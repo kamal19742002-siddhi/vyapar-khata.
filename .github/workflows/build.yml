@@ -525,8 +525,7 @@ jobs:
             };
 
             const openCamera = async () => {
-              const { status } = await ImagePicker.requestCameraPermissionsAsync();
-   ;
+              const { status } = await ImagePicker.requestCameraPermissionsAsync();  ;
                 }
                 const contact = await Contacts.presentContactPickerAsync();
                 if (contact) {

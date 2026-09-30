@@ -500,6 +500,229 @@ jobs:
                   <html>
                     <body style="font-family: Arial, sans-serif; padding: 25px; color: #222;">
                       <div style="text-align: center; border-bottom: 2px solid ${isEstimate ? "#e65100" : "#0759a8"}; padding-bottom: 10px;">
+                        <h1 style="color: ${isEstimate ? "#e65100" : "#0759a8"}; margin: 0;">${docTitle}<h");
+              setPaymentRef(entry.paymentRef || "");
+              setEntryType(entry.type || "Credit");
+              setAttachment(
+                entry.attachment
+                  ? { name: entry.attachment, uri: entry.attachmentUri }
+                  : null
+              );
+            };
+
+            const deleteEntry = (entryId) => {
+              Alert.alert(
+                "Delete Entry",
+                "Kya aap is passbook entry ko delete karna chahte hain?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                      const updatedEntries = (selected.entries || []).filter((e) => e.id !== entryId);
+                      const list = tab === "Customers" ? customers : suppliers;
+                      const updated = list.map((p) =>
+                        p.id === selected.id ? { ...p, entries: updatedEntries } : p
+                      );
+                      if (tab === "Customers") {
+                        setCustomers(updated);
+                        await saveData(updated, suppliers);
+                      } else {
+                        setSuppliers(updated);
+                        await saveData(customers, updated);
+                      }
+                      const fresh = updated.find((x) => x.id === selected.id);
+                      setSelected(fresh);
+                      if (editingEntryId === entryId) resetEntryForm();
+                      Alert.alert("Deleted", "Entry delete ho gayi.");
+                    }
+                  }
+                ]
+              );
+            };
+
+            const addTransaction = async () => {
+              if (!selected) return;
+              const value = Number(amount);
+              const cleanInvoice = invoiceNo.trim();
+
+              const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
+
+              if (!cleanInvoice) {
+                Alert.alert("Required", `${docFormat === "Estimate" ? "Estimate" : "Invoice"} number enter karein.`);
+                return;
+              }
+
+              if (!invoiceRegex.test(cleanInvoice)) {
+                Alert.alert(
+                  "Invalid Number",
+                  "Number mein kam se kam 1 digit hona chahiye aur sirf alphanumeric characters allow hain."
+                );
+                return;
+              }
+
+              if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
+                Alert.alert("Invalid Amount", "Valid amount enter karein.");
+                return;
+              }
+
+              let updatedEntries;
+              if (editingEntryId) {
+                updatedEntries = (selected.entries || []).map((e) =>
+                  e.id === editingEntryId
+                    ? {
+                        ...e,
+                        docFormat,
+                        invoiceNo: cleanInvoice,
+                        invoiceDate: invoiceDate.trim() || today(),
+                        amount: value,
+                        paymentMode,
+                        paymentRef: paymentRef.trim(),
+                        type: entryType,
+                        attachment: attachment ? attachment.name : null,
+                        attachmentUri: attachment ? attachment.uri : null
+                      }
+                    : e
+                );
+              } else {
+                const newEntry = {
+                  id: Date.now().toString(),
+                  docFormat,
+                  invoiceNo: cleanInvoice,
+                  invoiceDate: invoiceDate.trim() || today(),
+                  amount: value,
+                  paymentMode,
+                  paymentRef: paymentRef.trim(),
+                  type: entryType,
+                  attachment: attachment ? attachment.name : null,
+                  attachmentUri: attachment ? attachment.uri : null
+                };
+                updatedEntries = [newEntry, ...(selected.entries || [])];
+              }
+
+              const list = tab === "Customers" ? customers : suppliers;
+              const updated = list.map((p) =>
+                p.id === selected.id ? { ...p, entries: updatedEntries } : p
+              );
+
+              if (tab === "Customers") {
+                setCustomers(updated);
+                await saveData(updated, suppliers);
+              } else {
+                setSuppliers(updated);
+                await saveData(customers, updated);
+              }
+
+              const fresh = updated.find((x) => x.id === selected.id);
+              setSelected(fresh);
+              resetEntryForm();
+              Alert.alert("Success", editingEntryId ? "Entry update ho gayi." : "Entry save ho gayi.");
+            };
+
+            const openCamera = async () => {
+              const { status } = await ImagePicker.requestCameraPermissionsAsync();
+              if (status !== "granted") {
+                Alert.alert("Permission", "Camera permission allow karein.");
+                return;
+              }
+              const result = await ImagePicker.launchCameraAsync({
+                allowsEditing: true,
+                quality: 0.8
+              });
+              if (!result.canceled && result.assets?.length) {
+                const uri = result.assets[0].uri;
+                const name = uri.split("/").pop() || "Camera_Invoice.jpg";
+                setAttachment({ name, uri });
+              }
+            };
+
+            const openGallery = async () => {
+              const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+              if (status !== "granted") {
+                Alert.alert("Permission", "Gallery permission allow karein.");
+                return;
+              }
+              const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                quality: 0.8
+              });
+              if (!result.canceled && result.assets?.length) {
+                const uri = result.assets[0].uri;
+                const name = uri.split("/").pop() || "Gallery_Invoice.jpg";
+                setAttachment({ name, uri });
+              }
+            };
+
+            const openDocument = async () => {
+              const result = await DocumentPicker.getDocumentAsync({
+                type: ["application/pdf", "image/*"],
+                copyToCacheDirectory: true
+              });
+              if (!result.canceled && result.assets?.length) {
+                setAttachment({
+                  name: result.assets[0].name,
+                  uri: result.assets[0].uri
+                });
+              }
+            };
+
+            const chooseAttachment = () => {
+              Alert.alert(
+                "Upload Document",
+                "Attach karne ka tarika chunein:",
+                [
+                  { text: "📷 Camera (Photo & Crop)", onPress: openCamera },
+                  { text: "🖼️ Gallery (Phone & Crop)", onPress: openGallery },
+                  { text: "📄 Document / PDF", onPress: openDocument },
+                  { text: "Cancel", style: "cancel" }
+                ]
+              );
+            };
+
+            const sendWhatsAppText = async (entry) => {
+              if (!selected.phone) {
+                Alert.alert("Missing Phone", "Customer ka phone number maujood nahi hai.");
+                return;
+              }
+              let clean = selected.phone.replace(/[^0-9]/g, "");
+              if (clean.length === 10) clean = "91" + clean;
+              const formatLabel = entry.docFormat === "Estimate" ? "ESTIMATE / QUOTATION" : "TAX INVOICE";
+              const msg = `*Vyapar Khata - ${formatLabel}*\n\nNamaste *${selected.name}*,\n\n📄 Ref No: ${entry.invoiceNo}\n📅 Date: ${entry.invoiceDate}\n💰 Amount: ₹${entry.amount.toLocaleString("en-IN")}\nType: ${entry.type}\nPayment: ${entry.paymentMode}${entry.paymentRef ? " (" + entry.paymentRef + ")" : ""}\n\nDhanyawad!`;
+              const url = `whatsapp://send?phone=${clean}&text=${encodeURIComponent(msg)}`;
+              try {
+                const can = await Linking.canOpenURL(url);
+                if (can) {
+                  await Linking.openURL(url);
+                } else {
+                  Alert.alert("WhatsApp Error", "WhatsApp install nahi hai.");
+                }
+              } catch (e) {
+                Alert.alert("Error", "WhatsApp open nahi ho paya.");
+              }
+            };
+
+            const shareEntryAsPdf = async (entry) => {
+              try {
+                const isEstimate = entry.docFormat === "Estimate";
+                const docTitle = isEstimate ? "ESTIMATE / QUOTATION" : "TAX INVOICE";
+                const refLabel = isEstimate ? "Estimate No:" : "Invoice No:";
+                const noteText = isEstimate
+                  ? "<p style='text-align: center; color: #b71c1c; font-size: 11px;'>* This is an Estimate / Quotation copy, not an official GST Tax Invoice.</p>"
+                  : "<p style='text-align: center; color: #666; font-size: 11px;'>* Original Tax Invoice copy generated via Vyapar Khata.</p>";
+
+                const imgTag = entry.attachmentUri
+                  ? `<div style="margin-top:20px; text-align:center;">
+                      <p style="font-weight:bold; color:#555;">Attached Document Copy:</p>
+                      <img src="${entry.attachmentUri}" style="max-width:92%; max-height:550px; border:1px solid #ccc; border-radius:8px;" />
+                     </div>`
+                  : "";
+
+                const html = `
+                  <html>
+                    <body style="font-family: Arial, sans-serif; padding: 25px; color: #222;">
+                      <div style="text-align: center; border-bottom: 2px solid ${isEstimate ? "#e65100" : "#0759a8"}; padding-bottom: 10px;">
                         <h1 style="color: ${isEstimate ? "#e65100" : "#0759a8"}; margin: 0;">${docTitle}<ted.entries || [])];
               }
 

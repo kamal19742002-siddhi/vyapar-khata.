@@ -22,7 +22,6 @@ jobs:
         run: |
           npx --yes create-expo-app@latest vyapar-khata --template blank --no-install
           cd vyapar-khata
-
           npm install
           npx expo install @react-native-async-storage/async-storage expo-contacts expo-image-picker expo-document-picker babel-preset-expo @expo/metro-config
 
@@ -137,7 +136,6 @@ jobs:
             const [newPin, setNewPin] = useState("");
             const [confirmPin, setConfirmPin] = useState("");
             const [isSettingPin, setIsSettingPin] = useState(false);
-
             const [isMasterMode, setIsMasterMode] = useState(false);
             const [showMasterModal, setShowMasterModal] = useState(false);
             const [masterInputPin, setMasterInputPin] = useState("");
@@ -174,7 +172,6 @@ jobs:
                 const storedPin = await AsyncStorage.getItem(PIN_STORE);
                 const storedMaster = await AsyncStorage.getItem(MASTER_PIN_STORE);
                 if (storedMaster) setSavedMasterPin(storedMaster);
-
                 if (storedPin) {
                   setSavedPin(storedPin);
                   setIsLocked(true);
@@ -182,7 +179,6 @@ jobs:
                   setIsSettingPin(true);
                   setIsLocked(false);
                 }
-
                 const raw = await AsyncStorage.getItem(STORE);
                 if (raw) {
                   const data = JSON.parse(raw);
@@ -226,7 +222,7 @@ jobs:
                 setIsMasterMode(true);
                 setShowMasterModal(false);
                 setMasterInputPin("");
-                Alert.alert("Master Mode Enabled", "Consolidated (Official + Proforma) ledger active ho gaya.");
+                Alert.alert("Master Mode Enabled", "Consolidated ledger active ho gaya.");
               } else {
                 Alert.alert("Access Denied", "Galat Secret Master Code.");
                 setMasterInputPin("");
@@ -253,7 +249,7 @@ jobs:
             const resetEntryForm = () => {
               setEditingEntryId(null);
               const hasGst = selected && selected.gst && selected.gst.trim().length >= 5;
-              setDocFormat(hasGst ? "Invoice" : "Proforma");
+              setDocFormat(hasGst ? "Invoice" : "Estimate");
               setInvoiceNo("");
               setInvoiceDate(today());
               setAmount("");
@@ -285,1782 +281,10 @@ jobs:
 
             const savePerson = async () => {
               if (!name.trim()) {
-                Alert.alert("Required", "Kripya naam enter karein.");
-                return;
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-
-              if (editingPersonId) {
-                const updated = list.map((p) =>
-                  p.id === editingPersonId
-                    ? {
-                        ...p,
-                        name: name.trim(),
-                        phone: phone.trim(),
-                        gst: gst.trim(),
-                        address: address.trim(),
-                        email: email.trim()
-                      }
-                    : p
-                );
-
-                if (tab === "Customers") {
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                const fresh = updated.find((x) => x.id === editingPersonId);
-                setSelected(fresh);
-                resetProfile();
-                setScreen("profile");
-                Alert.alert("Updated", "Account update ho gaya.");
-              } else {
-                const person = {
-                  id: Date.now().toString(),
-                  name: name.trim(),
-                  phone: phone.trim(),
-                  gst: gst.trim(),
-                  address: address.trim(),
-                  email: email.trim(),
-                  entries: []
-                };
-
-                if (tab === "Customers") {
-                  const updated = [person, ...customers];
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  const updated = [person, ...suppliers];
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                resetProfile();
-                setScreen("home");
-                Alert.alert("Saved", "Account profile save ho gayi.");
-              }
-            };
-
-            const startEditProfile = () => {
-              if (!selected) return;
-              setEditingPersonId(selected.id);
-              setName(selected.name);
-              setPhone(selected.phone || "");
-              setGst(selected.gst || "");
-              setAddress(selected.address || "");
-              setEmail(selected.email || "");
-              setScreen("new");
-            };
-
-            const deleteProfile = () => {
-              if (!selected) return;
-              const typeName = tab === "Customers" ? "Customer" : "Supplier";
-              Alert.alert(
-                "Delete Account",
-                "Kya aap sach me " + selected.name + " ka account delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.filter((p) => p.id !== selected.id);
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      setSelected(null);
-                      setScreen("home");
-                      Alert.alert("Deleted", typeName + " delete ho gaya.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const startEditEntry = (entry) => {
-              setEditingEntryId(entry.id);
-              setDocFormat(entry.docFormat || "Invoice");
-              setInvoiceNo(entry.invoiceNo);
-              setInvoiceDate(entry.invoiceDate);
-              setAmount(String(entry.amount));
-              setPaymentMode(entry.paymentMode || "Cash");
-              setPaymentRef(entry.paymentRef || "");
-              setEntryType(entry.type || "Credit");
-              setAttachment(
-                entry.attachment
-                  ? { name: entry.attachment, uri: entry.attachmentUri }
-                  : null
-              );
-            };
-
-            const deleteEntry = (entryId) => {
-              Alert.alert(
-                "Delete Entry",
-                "Kya aap is entry ko delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const updatedEntries = (selected.entries || []).filter((e) => e.id !== entryId);
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.map((p) =>
-                        p.id === selected.id ? { ...p, entries: updatedEntries } : p
-                      );
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      const fresh = updated.find((x) => x.id === selected.id);
-                      setSelected(fresh);
-                      if (editingEntryId === entryId) resetEntryForm();
-                      Alert.alert("Deleted", "Entry remove ho gayi.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const addTransaction = async () => {
-              if (!selected) return;
-              const value = Number(amount);
-              const cleanInvoice = invoiceNo.trim();
-
-              const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
-
-              if (!cleanInvoice) {
-                Alert.alert("Required", "Document reference number enter karein.");
-                return;
-              }
-
-              if (!invoiceRegex.test(cleanInvoice)) {
-                Alert.alert(
-                  "Invalid Reference",
-                  "Kam se kam 1 number hona chahiye aur sirf alphanumeric characters allow hain."
-                );
-                return;
-              }
-
-              if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
-                Alert.alert("Invalid Amount", "Valid amount enter karein.");
-                return;
-              }
-
-              let updatedEntries;
-              if (editingEntryId) {
-                updatedEntries = (selected.entries || []).map((e) =>
-                  e.id === editingEntryId
-                    ? {
-                        ...e,
-                        docFormat: docFormat,
-                        invoiceNo: cleanInvoice,
-                        invoiceDate: invoiceDate.trim() || today(),
-                        amount: value,
-                        paymentMode: paymentMode,
-                        paymentRef: paymentRef.trim(),
-                        type: entryType,
-                        attachment: attachment ? attachment.name : null,
-                        attachmentUri: attachment ? attachment.uri : null
-                      }
-                    : e
-                );
-              } else {
-                const newEntry = {
-                  id: Date.now().toString(),
-                  docFormat: docFormat,
-                  invoiceNo: cleanInvoice,
-                  invoiceDate: invoiceDate.trim() || today(),
-                  amount: value,
-                  paymentMode: paymentMode,
-                  paymentRef: paymentRef.trim(),
-                  type: entryType,
-                  attachment: attachment ? attachment.name : null,
-                  attachmentUri: attachment ? attachment.uri : null
-                };
-                updatedEntries = [newEntry, ...(selected.entries || [])];
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-              const updated = list.map((p) =>
-                p.id === selected.id ? { ...p, entries: updatedEntries } : p
-              );
-
-              if (tab === "Customers") {
-                setCustomers(updated);
-                await saveData(updated, suppliers);
-              } else {
-                setSuppliers(updated);
-                await saveData(customers, updated);
-              }
-
-              const fresh = updated.find((x) => x.id === selected.id);
-              setSelected(fresh);
-              resetEntryForm();
-              Alert.alert("Success", editingEntryId ? "Record update ho gaya." : "Record save ho gaya.");
-            };
-
-            const openCamera = async () => {
-              const { status } = await ImagePicker.requestCameraPermissionsAsync();
-              if (status !== "granted") {
-                Alert.alert("Permission", "Camera permission allow karein.");
-                return;
-              }
-              const result = await ImagePicker.launchCameraAsync({
-                allowsEditing: true,
-                quality: 0.8
-              });
-              if (!result.canceled && result.assets && result.assets.length > 0) {
-                const uri = result.assets[0].uri;
-                const name = uri.split("/").pop() || "Camera_Doc.jpg";
-                setAttac     Alert.alert("Permission Required", "Contacts permission allow karein.");
-                  return;
-                }
-                const contact = await Contacts.presentContactPickerAsync();
-                if (contact) {
-                  if (contact.name) setName(contact.name);
-                  if (contact.phoneNumbers && contact.phoneNumbers.length > 0) {
-                    const clean = contact.phoneNumbers[0].number.replace(/[^0-9+]/g, "");
-                    setPhone(clean);
-                  }
-                }
-              } catch (err) {
-                Alert.alert("Error", "Contact select nahi ho saka.");
-              }
-            };
-
-            const savePerson = async () => {
-              if (!name.trim()) {
-                Alert.alert("Required", "Kripya naam enter karein.");
-                return;
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-
-              if (editingPersonId) {
-                const updated = list.map((p) =>
-                  p.id === editingPersonId
-                    ? {
-                        ...p,
-                        name: name.trim(),
-                        phone: phone.trim(),
-                        gst: gst.trim(),
-                        address: address.trim(),
-                        email: email.trim()
-                      }
-                    : p
-                );
-
-                if (tab === "Customers") {
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                const fresh = updated.find((x) => x.id === editingPersonId);
-                setSelected(fresh);
-                resetProfile();
-                setScreen("profile");
-                Alert.alert("Updated", "Account update ho gaya.");
-              } else {
-                const person = {
-                  id: Date.now().toString(),
-                  name: name.trim(),
-                  phone: phone.trim(),
-                  gst: gst.trim(),
-                  address: address.trim(),
-                  email: email.trim(),
-                  entries: []
-                };
-
-                if (tab === "Customers") {
-                  const updated = [person, ...customers];
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  const updated = [person, ...suppliers];
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                resetProfile();
-                setScreen("home");
-                Alert.alert("Saved", "Account profile save ho gayi.");
-              }
-            };
-
-            const startEditProfile = () => {
-              if (!selected) return;
-              setEditingPersonId(selected.id);
-              setName(selected.name);
-              setPhone(selected.phone || "");
-              setGst(selected.gst || "");
-              setAddress(selected.address || "");
-              setEmail(selected.email || "");
-              setScreen("new");
-            };
-
-            const deleteProfile = () => {
-              if (!selected) return;
-              const typeName = tab === "Customers" ? "Customer" : "Supplier";
-              Alert.alert(
-                "Delete Account",
-                "Kya aap sach me " + selected.name + " ka account delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.filter((p) => p.id !== selected.id);
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      setSelected(null);
-                      setScreen("home");
-                      Alert.alert("Deleted", typeName + " delete ho gaya.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const startEditEntry = (entry) => {
-              setEditingEntryId(entry.id);
-              setDocFormat(entry.docFormat || "Invoice");
-              setInvoiceNo(entry.invoiceNo);
-              setInvoiceDate(entry.invoiceDate);
-              setAmount(String(entry.amount));
-              setPaymentMode(entry.paymentMode || "Cash");
-              setPaymentRef(entry.paymentRef || "");
-              setEntryType(entry.type || "Credit");
-              setAttachment(
-                entry.attachment
-                  ? { name: entry.attachment, uri: entry.attachmentUri }
-                  : null
-              );
-            };
-
-            const deleteEntry = (entryId) => {
-              Alert.alert(
-                "Delete Entry",
-                "Kya aap is entry ko delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const updatedEntries = (selected.entries || []).filter((e) => e.id !== entryId);
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.map((p) =>
-                        p.id === selected.id ? { ...p, entries: updatedEntries } : p
-                      );
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      const fresh = updated.find((x) => x.id === selected.id);
-                      setSelected(fresh);
-                      if (editingEntryId === entryId) resetEntryForm();
-                      Alert.alert("Deleted", "Entry remove ho gayi.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const addTransaction = async () => {
-              if (!selected) return;
-              const value = Number(amount);
-              const cleanInvoice = invoiceNo.trim();
-
-              const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
-
-              if (!cleanInvoice) {
-                Alert.alert("Required", "Document reference number enter karein.");
-                return;
-              }
-
-              if (!invoiceRegex.test(cleanInvoice)) {
-                Alert.alert(
-                  "Invalid Reference",
-                  "Kam se kam 1 number hona chahiye aur sirf alphanumeric characters allow hain."
-                );
-                return;
-              }
-
-              if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
-                Alert.alert("Invalid Amount", "Valid amount enter karein.");
-                return;
-              }
-
-              let updatedEntries;
-              if (editingEntryId) {
-                updatedEntries = (selected.entries || []).map((e) =>
-                  e.id === editingEntryId
-                    ? {
-                        ...e,
-                        docFormat: docFormat,
-                        invoiceNo: cleanInvoice,
-                        invoiceDate: invoiceDate.trim() || today(),
-                        amount: value,
-                        paymentMode: paymentMode,
-                        paymentRef: paymentRef.trim(),
-                        type: entryType,
-                        attachment: attachment ? attachment.name : null,
-                        attachmentUri: attachment ? attachment.uri : null
-                      }
-                    : e
-                );
-              } else {
-                const newEntry = {
-                  id: Date.now().toString(),
-                  docFormat: docFormat,
-                  invoiceNo: cleanInvoice,
-                  invoiceDate: invoiceDate.trim() || today(),
-                  amount: value,
-                  paymentMode: paymentMode,
-                  paymentRef: paymentRef.trim(),
-                  type: entryType,
-                  attachment: attachment ? attachment.name : null,
-                  attachmentUri: attachment ? attachment.uri : null
-                };
-                updatedEntries = [newEntry, ...(selected.entries || [])];
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-              const updated = list.map((p) =>
-                p.id === selected.id ? { ...p, entries: updatedEntries } : p
-              );
-
-              if (tab === "Customers") {
-                setCustomers(updated);
-                await saveData(updated, suppliers);
-              } else {
-                setSuppliers(updated);
-                await saveData(customers, updated);
-              }
-
-              const fresh = updated.find((x) => x.id === selected.id);
-              setSelected(fresh);
-              resetEntryForm();
-              Alert.alert("Success", editingEntryId ? "Record update ho gaya." : "Record save ho gaya.");
-            };
-
-            const openCamera = async () => {
-              const { status } = await ImagePicker.requestCameraPermissionsAsync();
-              if (status !== "granted") {
-                Alert.alert("Permission", "Camera permission allow karein.");
-                return;
-              }
-              const result = await ImagePicker.launchCameraAsync({
-                allowsEditing:  = await Contacts.requestPermissionsAsync();
-                if (status !== "granted") {
-                  Alert.alert("Permission Required", "Contacts permission allow karein.");
-                  return;
-                }
-                const contact = await Contacts.presentContactPickerAsync();
-                if (contact) {
-                  if (contact.name) setName(contact.name);
-                  if (contact.phoneNumbers && contact.phoneNumbers.length > 0) {
-                    const clean = contact.phoneNumbers[0].number.replace(/[^0-9+]/g, "");
-                    setPhone(clean);
-                  }
-                }
-              } catch (err) {
-                Alert.alert("Error", "Contact select nahi ho saka.");
-              }
-            };
-
-            const savePerson = async () => {
-              if (!name.trim()) {
-                Alert.alert("Required", "Kripya naam enter karein.");
-                return;
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-
-              if (editingPersonId) {
-                const updated = list.map((p) =>
-                  p.id === editingPersonId
-                    ? {
-                        ...p,
-                        name: name.trim(),
-                        phone: phone.trim(),
-                        gst: gst.trim(),
-                        address: address.trim(),
-                        email: email.trim()
-                      }
-                    : p
-                );
-
-                if (tab === "Customers") {
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                const fresh = updated.find((x) => x.id === editingPersonId);
-                setSelected(fresh);
-                resetProfile();
-                setScreen("profile");
-                Alert.alert("Updated", "Account update ho gaya.");
-              } else {
-                const person = {
-                  id: Date.now().toString(),
-                  name: name.trim(),
-                  phone: phone.trim(),
-                  gst: gst.trim(),
-                  address: address.trim(),
-                  email: email.trim(),
-                  entries: []
-                };
-
-                if (tab === "Customers") {
-                  const updated = [person, ...customers];
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  const updated = [person, ...suppliers];
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                resetProfile();
-                setScreen("home");
-                Alert.alert("Saved", "Account profile save ho gayi.");
-              }
-            };
-
-            const startEditProfile = () => {
-              if (!selected) return;
-              setEditingPersonId(selected.id);
-              setName(selected.name);
-              setPhone(selected.phone || "");
-              setGst(selected.gst || "");
-              setAddress(selected.address || "");
-              setEmail(selected.email || "");
-              setScreen("new");
-            };
-
-            const deleteProfile = () => {
-              if (!selected) return;
-              const typeName = tab === "Customers" ? "Customer" : "Supplier";
-              Alert.alert(
-                "Delete Account",
-                "Kya aap sach me " + selected.name + " ka account delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.filter((p) => p.id !== selected.id);
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      setSelected(null);
-                      setScreen("home");
-                      Alert.alert("Deleted", typeName + " delete ho gaya.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const startEditEntry = (entry) => {
-              setEditingEntryId(entry.id);
-              setDocFormat(entry.docFormat || "Invoice");
-              setInvoiceNo(entry.invoiceNo);
-              setInvoiceDate(entry.invoiceDate);
-              setAmount(String(entry.amount));
-              setPaymentMode(entry.paymentMode || "Cash");
-              setPaymentRef(entry.paymentRef || "");
-              setEntryType(entry.type || "Credit");
-              setAttachment(
-                entry.attachment
-                  ? { name: entry.attachment, uri: entry.attachmentUri }
-                  : null
-              );
-            };
-
-            const deleteEntry = (entryId) => {
-              Alert.alert(
-                "Delete Entry",
-                "Kya aap is entry ko delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const updatedEntries = (selected.entries || []).filter((e) => e.id !== entryId);
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.map((p) =>
-                        p.id === selected.id ? { ...p, entries: updatedEntries } : p
-                      );
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      const fresh = updated.find((x) => x.id === selected.id);
-                      setSelected(fresh);
-                      if (editingEntryId === entryId) resetEntryForm();
-                      Alert.alert("Deleted", "Entry remove ho gayi.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const addTransaction = async () => {
-              if (!selected) return;
-              const value = Number(amount);
-              const cleanInvoice = invoiceNo.trim();
-
-              const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
-
-              if (!cleanInvoice) {
-                Alert.alert("Required", "Document reference number enter karein.");
-                return;
-              }
-
-              if (!invoiceRegex.test(cleanInvoice)) {
-                Alert.alert(
-                  "Invalid Reference",
-                  "Kam se kam 1 number hona chahiye aur sirf alphanumeric characters allow hain."
-                );
-                return;
-              }
-
-              if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
-                Alert.alert("Invalid Amount", "Valid amount enter karein.");
-                return;
-              }
-
-              let updatedEntries;
-              if (editingEntryId) {
-                updatedEntries = (selected.entries || []).map((e) =>
-                  e.id === editingEntryId
-                    ? {
-                        ...e,
-                        docFormat: docFormat,
-                        invoiceNo: cleanInvoice,
-                        invoiceDate: invoiceDate.trim() || today(),
-                        amount: value,
-                        paymentMode: paymentMode,
-                        paymentRef: paymentRef.trim(),
-                        type: entryType,
-                        attachment: attachment ? attachment.name : null,
-                        attachmentUri: attachment ? attachment.uri : null
-                      }
-                    : e
-                );
-              } else {
-                const newEntry = {
-                  id: Date.now().toString(),
-                  docFormat: docFormat,
-                  invoiceNo: cleanInvoice,
-                  invoiceDate: invoiceDate.trim() || today(),
-                  amount: value,
-                  paymentMode: paymentMode,
-                  paymentRef: paymentRef.trim(),
-                  type: entryType,
-                  attachment: attachment ? attachment.name : null,
-                  attachmentUri: attachment ? attachment.uri : null
-                };
-                updatedEntries = [newEntry, ...(selected.entries || [])];
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-              const updated = list.map((p) =>
-                p.id === selected.id ? { ...p, entries: updatedEntries } : p
-              );
-
-              if (tab === "Customers") {
-                setCustomers(updated);
-                await saveData(updated, suppliers);
-              } else {
-                setSuppliers(updated);
-                await saveData(customers, updated);
-              }
-
-              const fresh = updated.find((x) => x.id === selected.id);
-              setSelected(fresh);
-              resetEntryForm();
-              Alert.alert("Success", editingEntryId ? "Record update ho gaya." : "Record save ho gaya.");
-            };
-
-            const openCamera = async () => {
-              const { status } = await ImagePicker.requestCameraPermissionsAsync();
-              if (status !== "granted") {
-                Alert.alert("Permission", "Camera permission allow karein.");
-                return;
-            pe("Credit");
-              setAttachment(null);
-            };
-
-            const pickContact = async () => {
-              try {
-                const { status } = await Contacts.requestPermissionsAsync();
-                if (status !== "granted") {
-                  Alert.alert("Permission Required", "Contacts permission allow karein.");
-                  return;
-                }
-                const contact = await Contacts.presentContactPickerAsync();
-                if (contact) {
-                  if (contact.name) setName(contact.name);
-                  if (contact.phoneNumbers && contact.phoneNumbers.length > 0) {
-                    const clean = contact.phoneNumbers[0].number.replace(/[^0-9+]/g, "");
-                    setPhone(clean);
-                  }
-                }
-              } catch (err) {
-                Alert.alert("Error", "Contact select nahi ho saka.");
-              }
-            };
-
-            const savePerson = async () => {
-              if (!name.trim()) {
-                Alert.alert("Required", "Kripya naam enter karein.");
-                return;
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-
-              if (editingPersonId) {
-                const updated = list.map((p) =>
-                  p.id === editingPersonId
-                    ? {
-                        ...p,
-                        name: name.trim(),
-                        phone: phone.trim(),
-                        gst: gst.trim(),
-                        address: address.trim(),
-                        email: email.trim()
-                      }
-                    : p
-                );
-
-                if (tab === "Customers") {
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                const fresh = updated.find((x) => x.id === editingPersonId);
-                setSelected(fresh);
-                resetProfile();
-                setScreen("profile");
-                Alert.alert("Updated", "Account update ho gaya.");
-              } else {
-                const person = {
-                  id: Date.now().toString(),
-                  name: name.trim(),
-                  phone: phone.trim(),
-                  gst: gst.trim(),
-                  address: address.trim(),
-                  email: email.trim(),
-                  entries: []
-                };
-
-                if (tab === "Customers") {
-                  const updated = [person, ...customers];
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  const updated = [person, ...suppliers];
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                resetProfile();
-                setScreen("home");
-                Alert.alert("Saved", "Account profile save ho gayi.");
-              }
-            };
-
-            const startEditProfile = () => {
-              if (!selected) return;
-              setEditingPersonId(selected.id);
-              setName(selected.name);
-              setPhone(selected.phone || "");
-              setGst(selected.gst || "");
-              setAddress(selected.address || "");
-              setEmail(selected.email || "");
-              setScreen("new");
-            };
-
-            const deleteProfile = () => {
-              if (!selected) return;
-              const typeName = tab === "Customers" ? "Customer" : "Supplier";
-              Alert.alert(
-                "Delete Account",
-                "Kya aap sach me " + selected.name + " ka account delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.filter((p) => p.id !== selected.id);
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      setSelected(null);
-                      setScreen("home");
-                      Alert.alert("Deleted", typeName + " delete ho gaya.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const startEditEntry = (entry) => {
-              setEditingEntryId(entry.id);
-              setDocFormat(entry.docFormat || "Invoice");
-              setInvoiceNo(entry.invoiceNo);
-              setInvoiceDate(entry.invoiceDate);
-              setAmount(String(entry.amount));
-              setPaymentMode(entry.paymentMode || "Cash");
-              setPaymentRef(entry.paymentRef || "");
-              setEntryType(entry.type || "Credit");
-              setAttachment(
-                entry.attachment
-                  ? { name: entry.attachment, uri: entry.attachmentUri }
-                  : null
-              );
-            };
-
-            const deleteEntry = (entryId) => {
-              Alert.alert(
-                "Delete Entry",
-                "Kya aap is entry ko delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const updatedEntries = (selected.entries || []).filter((e) => e.id !== entryId);
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.map((p) =>
-                        p.id === selected.id ? { ...p, entries: updatedEntries } : p
-                      );
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      const fresh = updated.find((x) => x.id === selected.id);
-                      setSelected(fresh);
-                      if (editingEntryId === entryId) resetEntryForm();
-                      Alert.alert("Deleted", "Entry remove ho gayi.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const addTransaction = async () => {
-              if (!selected) return;
-              const value = Number(amount);
-              const cleanInvoice = invoiceNo.trim();
-
-              const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
-
-              if (!cleanInvoice) {
-                Alert.alert("Required", "Document number enter karein.");
-                return;
-              }
-
-              if (!invoiceRegex.test(cleanInvoice)) {
-                Alert.alert(
-                  "Invalid Reference",
-                  "Kam se kam 1 number hona chahiye aur sirf alphanumeric characters allow hain."
-                );
-                return;
-              }
-
-              if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
-                Alert.alert("Invalid Amount", "Valid amount enter karein.");
-                return;
-              }
-
-              let updatedEntries;
-              if (editingEntryId) {
-                updatedEntries = (selected.entries || []).map((e) =>
-                  e.id === editingEntryId
-                    ? {
-                        ...e,
-                        docFormat: docFormat,
-                        invoiceNo: cleanInvoice,
-                        invoiceDate: invoiceDate.trim() || today(),
-                        amount: value,
-                        paymentMode: paymentMode,
-                        paymentRef: paymentRef.trim(),
-                        type: entryType,
-                        attachment: attachment ? attachment.name : null,
-                        attachmentUri: attachment ? attachment.uri : null
-                      }
-                    : e
-                );
-              } else {
-                const newEntry = {
-                  id: Date.now().toString(),
-                  docFormat: docFormat,
-                  invoiceNo: cleanInvoice,
-                  invoiceDate: invoiceDate.trim() || today(),
-                  amount: value,
-                  paymentMode: paymentMode,
-                  paymentRef: paymentRef.trim(),
-                  type: entryType,
-                  attachment: attachment ? attachment.name : null,
-                  attachmentUri: attachment ? attachment.uri : null
-                };
-                updatedEntries = [newEntry, ...(selected.entries || [])];
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-              const updated = list.map((p) =>
-                p.id === selected.id ? { ...p, entries: updatedEntries } : p
-              );
-
-              if (tab === "Customers") {
-                setCustomers(updated);
-                await saveData(updated, suppliers);
-              } else {
-                setSuppliers(updated);
-                await saveData(customers, updated);
-              }
-
-              const fresh = updated.find((x) => x.id === selected.id);
-              setSelected(fresh);
-              resetEntryForm();
-              Alert.alert("Success", editingEntryId ? "Record update ho gaya." : "Record save ho gaya.");
-            };
-
-            const openCamera = async () => {
-              const { status } = await ImagePicker.requestCameraPermissionsAsync();  ;
-                }
-                const contact = await Contacts.presentContactPickerAsync();
-                if (contact) {
-                  if (contact.name) setName(contact.name);
-                  if (contact.phoneNumbers && contact.phoneNumbers.length > 0) {
-                    const clean = contact.phoneNumbers[0].number.replace(/[^0-9+]/g, "");
-                    setPhone(clean);
-                  }
-                }
-              } catch (err) {
-                Alert.alert("Error", "Contact select nahi ho saka.");
-              }
-            };
-
-            const savePerson = async () => {
-              if (!name.trim()) {
-                Alert.alert("Required", "Kripya naam enter karein.");
-                return;
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-
-              if (editingPersonId) {
-                const updated = list.map((p) =>
-                  p.id === editingPersonId
-                    ? {
-                        ...p,
-                        name: name.trim(),
-                        phone: phone.trim(),
-                        gst: gst.trim(),
-                        address: address.trim(),
-                        email: email.trim()
-                      }
-                    : p
-                );
-
-                if (tab === "Customers") {
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                const fresh = updated.find((x) => x.id === editingPersonId);
-                setSelected(fresh);
-                resetProfile();
-                setScreen("profile");
-                Alert.alert("Updated", "Account update ho gaya.");
-              } else {
-                const person = {
-                  id: Date.now().toString(),
-                  name: name.trim(),
-                  phone: phone.trim(),
-                  gst: gst.trim(),
-                  address: address.trim(),
-                  email: email.trim(),
-                  entries: []
-                };
-
-                if (tab === "Customers") {
-                  const updated = [person, ...customers];
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  const updated = [person, ...suppliers];
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                resetProfile();
-                setScreen("home");
-                Alert.alert("Saved", "Account profile save ho gayi.");
-              }
-            };
-
-            const startEditProfile = () => {
-              if (!selected) return;
-              setEditingPersonId(selected.id);
-              setName(selected.name);
-              setPhone(selected.phone || "");
-              setGst(selected.gst || "");
-              setAddress(selected.address || "");
-              setEmail(selected.email || "");
-              setScreen("new");
-            };
-
-            const deleteProfile = () => {
-              if (!selected) return;
-              const typeName = tab === "Customers" ? "Customer" : "Supplier";
-              Alert.alert(
-                "Delete Account",
-                "Kya aap sach me " + selected.name + " ka account delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.filter((p) => p.id !== selected.id);
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      setSelected(null);
-                      setScreen("home");
-                      Alert.alert("Deleted", typeName + " delete ho gaya.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const startEditEntry = (entry) => {
-              setEditingEntryId(entry.id);
-              setDocFormat(entry.docFormat || "Invoice");
-              setInvoiceNo(entry.invoiceNo);
-              setInvoiceDate(entry.invoiceDate);
-              setAmount(String(entry.amount));
-              setPaymentMode(entry.paymentMode || "Cash");
-              setPaymentRef(entry.paymentRef || "");
-              setEntryType(entry.type || "Credit");
-              setAttachment(
-                entry.attachment
-                  ? { name: entry.attachment, uri: entry.attachmentUri }
-                  : null
-              );
-            };
-
-            const deleteEntry = (entryId) => {
-              Alert.alert(
-                "Delete Entry",
-                "Kya aap is entry ko delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const updatedEntries = (selected.entries || []).filter((e) => e.id !== entryId);
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.map((p) =>
-                        p.id === selected.id ? { ...p, entries: updatedEntries } : p
-                      );
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      const fresh = updated.find((x) => x.id === selected.id);
-                      setSelected(fresh);
-                      if (editingEntryId === entryId) resetEntryForm();
-                      Alert.alert("Deleted", "Entry remove ho gayi.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const addTransaction = async () => {
-              if (!selected) return;
-              const value = Number(amount);
-              const cleanInvoice = invoiceNo.trim();
-
-              const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
-
-              if (!cleanInvoice) {
-                Alert.alert("Required", "Document number enter karein.");
-                return;
-              }
-
-              if (!invoiceRegex.test(cleanInvoice)) {
-                Alert.alert(
-                  "Invalid Reference",
-                  "Kam se kam 1 number hona chahiye aur sirf alphanumeric characters allow hain."
-                );
-                return;
-              }
-
-              if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
-                Alert.alert("Invalid Amount", "Valid amount enter karein.");
-                return;
-              }
-
-              let updatedEntries;
-              if (editingEntryId) {
-                updatedEntries = (selected.entries || []).map((e) =>
-                  e.id === editingEntryId
-                    ? {
-                        ...e,
-                        docFormat: docFormat,
-                        invoiceNo: cleanInvoice,
-                        invoiceDate: invoiceDate.trim() || today(),
-                        amount: value,
-                        paymentMode: paymentMode,
-                        paymentRef: paymentRef.trim(),
-                        type: entryType,
-                        attachment: attachment ? attachment.name : null,
-                        attachmentUri: attachment ? attachment.uri : null
-                      }
-                    : e
-                );
-              } else {
-                const newEntry = {
-                  id: Date.now().toString(),
-                  docFormat: docFormat,
-                  invoiceNo: cleanInvoice,
-                  invoiceDate: invoiceDate.trim() || today(),
-                  amount: value,
-                  paymentMode: paymentMode,
-                  paymentRef: paymentRef.trim(),
-                  type: entryType,
-                  attachment: attachment ? attachment.name : null,
-                  attachmentUri: attachment ? attachment.uri : null
-                };
-                updatedEntries = [newEntry, ...(selected.entries || [])];
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-              const updated = list.map((p) =>
-                p.id === selected.id ? { ...p, entries: updatedEntries } : p
-              );
-
-              if (tab === "Customers") {
-                setCustomers(updated);
-                await saveData(updated, suppliers);
-              } else {
-                setSuppliers(updated);
-                await saveData(customers, updated);
-              }
-
-              const fresh = updated.find((x) => x.id === selected.id);
-              setSelected(fresh);
-              resetEntryForm();
-              Alert.alert("Success", editingEntryId ? "Record update ho gaya." : "Record save ho gaya.");
-            };
-
-            const openCamera = async () => {
-              const { status } = await ImagePicker.requestCameraPermissionsAsync();
-              if (status !== "granted") {
-                Alert.alert("Permission", "Camera permission allow karein.");
-                return;
-              }
-              const result = await ImagePicker.launchCameraAsync({
-                allowsEditing: true,
-                quality: 0.8
-              });
-              if (!result.canceled && result.assets && resu        setPhone(clean);
-                  }
-                }
-              } catch (err) {
-                Alert.alert("Error", "Contact select nahi ho saka.");
-              }
-            };
-
-            const savePerson = async () => {
-              if (!name.trim()) {
-                Alert.alert("Required", "Kripya naam enter karein.");
-                return;
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-
-              if (editingPersonId) {
-                const updated = list.map((p) =>
-                  p.id === editingPersonId
-                    ? {
-                        ...p,
-                        name: name.trim(),
-                        phone: phone.trim(),
-                        gst: gst.trim(),
-                        address: address.trim(),
-                        email: email.trim()
-                      }
-                    : p
-                );
-
-                if (tab === "Customers") {
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                const fresh = updated.find((x) => x.id === editingPersonId);
-                setSelected(fresh);
-                resetProfile();
-                setScreen("profile");
-                Alert.alert("Updated", "Account update ho gaya.");
-              } else {
-                const person = {
-                  id: Date.now().toString(),
-                  name: name.trim(),
-                  phone: phone.trim(),
-                  gst: gst.trim(),
-                  address: address.trim(),
-                  email: email.trim(),
-                  entries: []
-                };
-
-                if (tab === "Customers") {
-                  const updated = [person, ...customers];
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  const updated = [person, ...suppliers];
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                resetProfile();
-                setScreen("home");
-                Alert.alert("Saved", "Account profile save ho gayi.");
-              }
-            };
-
-            const startEditProfile = () => {
-              if (!selected) return;
-              setEditingPersonId(selected.id);
-              setName(selected.name);
-              setPhone(selected.phone || "");
-              setGst(selected.gst || "");
-              setAddress(selected.address || "");
-              setEmail(selected.email || "");
-              setScreen("new");
-            };
-
-            const deleteProfile = () => {
-              if (!selected) return;
-              const typeName = tab === "Customers" ? "Customer" : "Supplier";
-              Alert.alert(
-                "Delete Account",
-                "Kya aap sach me " + selected.name + " ka poora account delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.filter((p) => p.id !== selected.id);
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      setSelected(null);
-                      setScreen("home");
-                      Alert.alert("Deleted", typeName + " delete ho gaya.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const startEditEntry = (entry) => {
-              setEditingEntryId(entry.id);
-              setDocFormat(entry.docFormat || "Invoice");
-              setInvoiceNo(entry.invoiceNo);
-              setInvoiceDate(entry.invoiceDate);
-              setAmount(String(entry.amount));
-              setPaymentMode(entry.paymentMode || "Cash");
-              setPaymentRef(entry.paymentRef || "");
-              setEntryType(entry.type || "Credit");
-              setAttachment(
-                entry.attachment
-                  ? { name: entry.attachment, uri: entry.attachmentUri }
-                  : null
-              );
-            };
-
-            const deleteEntry = (entryId) => {
-              Alert.alert(
-                "Delete Entry",
-                "Kya aap is entry ko delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const updatedEntries = (selected.entries || []).filter((e) => e.id !== entryId);
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.map((p) =>
-                        p.id === selected.id ? { ...p, entries: updatedEntries } : p
-                      );
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      const fresh = updated.find((x) => x.id === selected.id);
-                      setSelected(fresh);
-                      if (editingEntryId === entryId) resetEntryForm();
-                      Alert.alert("Deleted", "Entry remove ho gayi.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const addTransaction = async () => {
-              if (!selected) return;
-              const value = Number(amount);
-              const cleanInvoice = invoiceNo.trim();
-
-              const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
-
-              if (!cleanInvoice) {
-                Alert.alert("Required", "Document number enter karein.");
-                return;
-              }
-
-              if (!invoiceRegex.test(cleanInvoice)) {
-                Alert.alert(
-                  "Invalid Reference",
-                  "Kam se kam 1 number hona chahiye aur sirf alphanumeric characters allow hain."
-                );
-                return;
-              }
-
-              if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
-                Alert.alert("Invalid Amount", "Valid amount enter karein.");
-                return;
-              }
-
-              let updatedEntries;
-              if (editingEntryId) {
-                updatedEntries = (selected.entries || []).map((e) =>
-                  e.id === editingEntryId
-                    ? {
-                        ...e,
-                        docFormat: docFormat,
-                        invoiceNo: cleanInvoice,
-                        invoiceDate: invoiceDate.trim() || today(),
-                        amount: value,
-                        paymentMode: paymentMode,
-                        paymentRef: paymentRef.trim(),
-                        type: entryType,
-                        attachment: attachment ? attachment.name : null,
-                        attachmentUri: attachment ? attachment.uri : null
-                      }
-                    : e
-                );
-              } else {
-                const newEntry = {
-                  id: Date.now().toString(),
-                  docFormat: docFormat,
-                  invoiceNo: cleanInvoice,
-                  invoiceDate: invoiceDate.trim() || today(),
-                  amount: value,
-                  paymentMode: paymentMode,
-                  paymentRef: paymentRef.trim(),
-                  type: entryType,
-                  attachment: attachment ? attachment.name : null,
-                  attachmentUri: attachment ? attachment.uri : null
-                };
-                updatedEntries = [newEntry, ...(selected.entries || [])];
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-              const updated = list.map((p) =>
-                p.id === selected.id ? { ...p, entries: updatedEntries } : p
-              );
-
-              if (tab === "Customers") {
-                setCustomers(updated);
-                await saveData(updated, suppliers);
-              } else {
-                setSuppliers(updated);
-                await saveData(customers, updated);
-              }
-
-              const fresh = updated.find((x) => x.id === selected.id);
-              setSelected(fresh);
-              resetEntryForm();
-              Alert.alert("Success", editingEntryId ? "Record update ho gaya." : "Record save ho gaya.");
-            };
-
-            const openCamera = async () => {
-              const { status } = await ImagePicker.requestCameraPermissionsAsync();
-              if (status !== "granted") {
-                Alert.alert("Permission", "Camera permission allow karein.");
-                return;
-              }
-              const result = await ImagePicker.launchCameraAsync({
-                allowsEditing: true,
-                quality: 0.8
-              });
-              if (!result.canceled && result.assets && result.assets.length > 0) {
-                const uri = result.assets[0].uri;
-                const name = uri.split("/").pop() || "Camera_Doc.jpg";
-                setAttachment({ name, uri });
-              }
-            };
-
-            const openGallery = async () => {
-              const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            setPhone(clean);
-                  }
-                }
-              } catch (err) {
-                Alert.alert("Error", "Contact select nahi ho saka.");
-              }
-            };
-
-            const savePerson = async () => {
-              if (!name.trim()) {
-                Alert.alert("Required", "Kripya naam enter karein.");
-                return;
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-
-              if (editingPersonId) {
-                const updated = list.map((p) =>
-                  p.id === editingPersonId
-                    ? {
-                        ...p,
-                        name: name.trim(),
-                        phone: phone.trim(),
-                        gst: gst.trim(),
-                        address: address.trim(),
-                        email: email.trim()
-                      }
-                    : p
-                );
-
-                if (tab === "Customers") {
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                const fresh = updated.find((x) => x.id === editingPersonId);
-                setSelected(fresh);
-                resetProfile();
-                setScreen("profile");
-                Alert.alert("Updated", "Account update ho gaya.");
-              } else {
-                const person = {
-                  id: Date.now().toString(),
-                  name: name.trim(),
-                  phone: phone.trim(),
-                  gst: gst.trim(),
-                  address: address.trim(),
-                  email: email.trim(),
-                  entries: []
-                };
-
-                if (tab === "Customers") {
-                  const updated = [person, ...customers];
-                  setCustomers(updated);
-                  await saveData(updated, suppliers);
-                } else {
-                  const updated = [person, ...suppliers];
-                  setSuppliers(updated);
-                  await saveData(customers, updated);
-                }
-
-                resetProfile();
-                setScreen("home");
-                Alert.alert("Saved", "Account profile save ho gayi.");
-              }
-            };
-
-            const startEditProfile = () => {
-              if (!selected) return;
-              setEditingPersonId(selected.id);
-              setName(selected.name);
-              setPhone(selected.phone || "");
-              setGst(selected.gst || "");
-              setAddress(selected.address || "");
-              setEmail(selected.email || "");
-              setScreen("new");
-            };
-
-            const deleteProfile = () => {
-              if (!selected) return;
-              const typeName = tab === "Customers" ? "Customer" : "Supplier";
-              Alert.alert(
-                "Delete Account",
-                "Kya aap sach me " + selected.name + " ka poora account delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.filter((p) => p.id !== selected.id);
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      setSelected(null);
-                      setScreen("home");
-                      Alert.alert("Deleted", typeName + " delete ho gaya.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const startEditEntry = (entry) => {
-              setEditingEntryId(entry.id);
-              setDocFormat(entry.docFormat || "Invoice");
-              setInvoiceNo(entry.invoiceNo);
-              setInvoiceDate(entry.invoiceDate);
-              setAmount(String(entry.amount));
-              setPaymentMode(entry.paymentMode || "Cash");
-              setPaymentRef(entry.paymentRef || "");
-              setEntryType(entry.type || "Credit");
-              setAttachment(
-                entry.attachment
-                  ? { name: entry.attachment, uri: entry.attachmentUri }
-                  : null
-              );
-            };
-
-            const deleteEntry = (entryId) => {
-              Alert.alert(
-                "Delete Entry",
-                "Kya aap is entry ko delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const updatedEntries = (selected.entries || []).filter((e) => e.id !== entryId);
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.map((p) =>
-                        p.id === selected.id ? { ...p, entries: updatedEntries } : p
-                      );
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      const fresh = updated.find((x) => x.id === selected.id);
-                      setSelected(fresh);
-                      if (editingEntryId === entryId) resetEntryForm();
-                      Alert.alert("Deleted", "Entry remove ho gayi.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const addTransaction = async () => {
-              if (!selected) return;
-              const value = Number(amount);
-              const cleanInvoice = invoiceNo.trim();
-
-              const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
-
-              if (!cleanInvoice) {
-                Alert.alert("Required", "Document number enter karein.");
-                return;
-              }
-
-              if (!invoiceRegex.test(cleanInvoice)) {
-                Alert.alert(
-                  "Invalid Reference",
-                  "Kam se kam 1 number hona chahiye aur sirf alphanumeric characters allow hain."
-                );
-                return;
-              }
-
-              if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
-                Alert.alert("Invalid Amount", "Valid amount enter karein.");
-                return;
-              }
-
-              let updatedEntries;
-              if (editingEntryId) {
-                updatedEntries = (selected.entries || []).map((e) =>
-                  e.id === editingEntryId
-                    ? {
-                        ...e,
-                        docFormat: docFormat,
-                        invoiceNo: cleanInvoice,
-                        invoiceDate: invoiceDate.trim() || today(),
-                        amount: value,
-                        paymentMode: paymentMode,
-                        paymentRef: paymentRef.trim(),
-                        type: entryType,
-                        attachment: attachment ? attachment.name : null,
-                        attachmentUri: attachment ? attachment.uri : null
-                      }
-                    : e
-                );
-              } else {
-                const newEntry = {
-                  id: Date.now().toString(),
-                  docFormat: docFormat,
-                  invoiceNo: cleanInvoice,
-                  invoiceDate: invoiceDate.trim() || today(),
-                  amount: value,
-                  paymentMode: paymentMode,
-                  paymentRef: paymentRef.trim(),
-                  type: entryType,
-                  attachment: attachment ? attachment.name : null,
-                  attachmentUri: attachment ? attachment.uri : null
-                };
-                updatedEntries = [newEntry, ...(selected.entries || [])];
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-              const updated = list.map((p) =>
-                p.id === selected.id ? { ...p, entries: updatedEntries } : p
-              );
-
-              if (tab === "Customers") {
-                setCustomers(updated);
-                await saveData(updated, suppliers);
-              } else {
-                setSuppliers(updated);
-                await saveData(customers, updated);
-              }
-
-              const fresh = updated.find((x) => x.id === selected.id);
-              setSelected(fresh);
-              resetEntryForm();
-              Alert.alert("Success", editingEntryId ? "Record update ho gaya." : "Record save ho gaya.");
-            };
-
-            const openCamera = async () => {
-              const { status } = await ImagePicker.requestCameraPermissionsAsync();
-              if (status !== "granted") {
-                Alert.alert("Permission", "Camera permission allow karein.");
-                return;
-              }
-              const result = await ImagePicker.launchCameraAsync({
-                allowsEditing: true,
-                quality: 0.8
-              });
-              if (!result.canceled && result.assets && result.assets.length > 0) {
-                const uri = result.assets[0].uri;
-                const name = uri.split("/").pop() || "Camera_Doc.jpg";
-                setAttachment({ name, uri });
-              }
-            };
-
-            const openGallery = async () => {
-              const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-              Error", "Contact access nahi ho saka.");
-              }
-            };
-
-            const savePerson = async () => {
-              if (!name.trim()) {
                 Alert.alert("Required", "Kripya party ka naam enter karein.");
                 return;
               }
-
               const list = tab === "Customers" ? customers : suppliers;
-
               if (editingPersonId) {
                 const updated = list.map((p) =>
                   p.id === editingPersonId
@@ -2074,7 +298,6 @@ jobs:
                       }
                     : p
                 );
-
                 if (tab === "Customers") {
                   setCustomers(updated);
                   await saveData(updated, suppliers);
@@ -2082,7 +305,6 @@ jobs:
                   setSuppliers(updated);
                   await saveData(customers, updated);
                 }
-
                 const fresh = updated.find((x) => x.id === editingPersonId);
                 setSelected(fresh);
                 resetProfile();
@@ -2098,7 +320,6 @@ jobs:
                   email: email.trim(),
                   entries: []
                 };
-
                 if (tab === "Customers") {
                   const updated = [person, ...customers];
                   setCustomers(updated);
@@ -2108,7 +329,6 @@ jobs:
                   setSuppliers(updated);
                   await saveData(customers, updated);
                 }
-
                 resetProfile();
                 setScreen("home");
                 Alert.alert("Saved", "Account profile safaltapoorvak jod li gayi.");
@@ -2131,7 +351,7 @@ jobs:
               const typeName = tab === "Customers" ? "Customer" : "Supplier";
               Alert.alert(
                 "Delete Account",
-                "Kya aap sach me " + selected.name + " ka poora account ledger delete karna chahte hain?",
+                "Kya aap sach me " + selected.name + " ka poora account delete karna chahte hain?",
                 [
                   { text: "Cancel", style: "cancel" },
                   {
@@ -2149,7 +369,7 @@ jobs:
                       }
                       setSelected(null);
                       setScreen("home");
-                      Alert.alert("Deleted", typeName + " account delete ho gaya.");
+                      Alert.alert("Deleted", typeName + " delete ho gaya.");
                     }
                   }
                 ]
@@ -2165,143 +385,6 @@ jobs:
               setPaymentMode(entry.paymentMode || "Cash");
               setPaymentRef(entry.paymentRef || "");
               setEntryType(entry.type || "Credit");
-              setAttachment(
-                entry.attachment
-                  ? { name: entry.attachment, uri: entry.attachmentUri }
-                  : null
-              );
-            };
-
-            const deleteEntry = (entryId) => {
-              Alert.alert(
-                "Delete Entry",
-                "Kya aap is ledger entry ko delete karna chahte hain?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                      const updatedEntries = (selected.entries || []).filter((e) => e.id !== entryId);
-                      const list = tab === "Customers" ? customers : suppliers;
-                      const updated = list.map((p) =>
-                        p.id === selected.id ? { ...p, entries: updatedEntries } : p
-                      );
-                      if (tab === "Customers") {
-                        setCustomers(updated);
-                        await saveData(updated, suppliers);
-                      } else {
-                        setSuppliers(updated);
-                        await saveData(customers, updated);
-                      }
-                      const fresh = updated.find((x) => x.id === selected.id);
-                      setSelected(fresh);
-                      if (editingEntryId === entryId) resetEntryForm();
-                      Alert.alert("Deleted", "Entry remove kar di gayi.");
-                    }
-                  }
-                ]
-              );
-            };
-
-            const addTransaction = async () => {
-              if (!selected) return;
-              const value = Number(amount);
-              const cleanInvoice = invoiceNo.trim();
-
-              const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
-
-              if (!cleanInvoice) {
-                Alert.alert("Required", "Document reference number enter karein.");
-                return;
-              }
-
-              if (!invoiceRegex.test(cleanInvoice)) {
-                Alert.alert(
-                  "Invalid Reference",
-                  "Kam se kam 1 digit aur alphanumeric format hona aavashyak hai."
-                );
-                return;
-              }
-
-              if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
-                Alert.alert("Invalid Amount", "Valid commercial amount enter karein.");
-                return;
-              }
-
-              let updatedEntries;
-              if (editingEntryId) {
-                updatedEntries = (selected.entries || []).map((e) =>
-                  e.id === editingEntryId
-                    ? {
-                        ...e,
-                        docFormat: docFormat,
-                        invoiceNo: cleanInvoice,
-                        invoiceDate: invoiceDate.trim() || today(),
-                        amount: value,
-                        paymentMode: paymentMode,
-                        paymentRef: paymentRef.trim(),
-                        type: entryType,
-                        attachment: attachment ? attachment.name : null,
-                        attachmentUri: attachment ? attachment.uri : null
-                      }
-                    : e
-                );
-              } else {
-                const newEntry = {
-                  id: Date.now().toString(),
-                  docFormat: docFormat,
-                  invoiceNo: cleanInvoice,
-                  invoiceDate: invoiceDate.trim() || today(),
-                  amount: value,
-                  paymentMode: paymentMode,
-                  paymentRef: paymentRef.trim(),
-                  type: entryType,
-                  attachment: attachment ? attachment.name : null,
-                  attachmentUri: attachment ? attachment.uri : null
-                };
-                updatedEntries = [newEntry, ...(selected.entries || [])];
-              }
-
-              const list = tab === "Customers" ? customers : suppliers;
-              const updated = list.map((p) =>
-                p.id === selected.id ? { ...p, entries: updatedEntries } : p
-              );
-
-              if (tab === "Customers") {
-                setCustomers(updated);
-                await saveData(updated, suppliers);
-              } else {
-                setSuppliers(updated);
-                await saveData(customers, updated);
-              }
-
-              const fresh = updated.find((x) => x.id === selected.id);
-              setSelected(fresh);
-              resetEntryForm();
-              Alert.alert("Success", editingEntryId ? "Ledger record updated." : "Ledger record saved.");
-            };
-
-            const openCamera = async () => {
-              const { status } = await ImagePicker.requestCameraPermissionsAsync();
-              if (status !== "granted") {
-                Alert.alert("Permission", "Camera permission allow karein.");
-                return;
-              }
-              const result = await ImagePicker.launchCameraAsync({
-                allowsEditing: true,
-                quality: 0.8
-              });
-              if (!result.canceled && result.assets && result.assets.length > 0) {
-                const uri = result.assets[0].uri;
-                const name = uri.split("/").pop() || "Scanned_Document.jpg";
-                setAttachment({ name, uri });
-              }
-            };
-
-            const openGallery = async () => {
-              const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-              if (status !== "grantedit");
               setAttachment(
                 entry.attachment
                   ? { name: entry.attachment, uri: entry.attachmentUri }
@@ -2345,27 +428,22 @@ jobs:
               if (!selected) return;
               const value = Number(amount);
               const cleanInvoice = invoiceNo.trim();
-
               const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
-
               if (!cleanInvoice) {
                 Alert.alert("Required", "Invoice / Estimate number enter karein.");
                 return;
               }
-
               if (!invoiceRegex.test(cleanInvoice)) {
                 Alert.alert(
                   "Invalid Number",
-                  "Kam se kam 1 digit hona zaroori hai aur sirf alphanumeric characters allow hain."
+                  "Kam se kam 1 number hona zaroori hai aur sirf alphanumeric characters allow hain."
                 );
                 return;
               }
-
               if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
                 Alert.alert("Invalid Amount", "Valid amount enter karein.");
                 return;
               }
-
               let updatedEntries;
               if (editingEntryId) {
                 updatedEntries = (selected.entries || []).map((e) =>
@@ -2399,12 +477,10 @@ jobs:
                 };
                 updatedEntries = [newEntry, ...(selected.entries || [])];
               }
-
               const list = tab === "Customers" ? customers : suppliers;
               const updated = list.map((p) =>
                 p.id === selected.id ? { ...p, entries: updatedEntries } : p
               );
-
               if (tab === "Customers") {
                 setCustomers(updated);
                 await saveData(updated, suppliers);
@@ -2412,7 +488,6 @@ jobs:
                 setSuppliers(updated);
                 await saveData(customers, updated);
               }
-
               const fresh = updated.find((x) => x.id === selected.id);
               setSelected(fresh);
               resetEntryForm();
@@ -2648,14 +723,12 @@ jobs:
                         value={name}
                         onChangeText={setName}
                       />
-
                       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                         <Text style={styles.label}>Phone Number</Text>
                         <TouchableOpacity onPress={pickContact} style={styles.pickContactBtn}>
                           <Text style={styles.pickContactText}>📞 Contacts se chunein</Text>
                         </TouchableOpacity>
                       </View>
-
                       <TextInput
                         style={styles.input}
                         placeholder="Phone Number"
@@ -2663,7 +736,6 @@ jobs:
                         value={phone}
                         onChangeText={setPhone}
                       />
-
                       <Text style={styles.label}>GST Number</Text>
                       <TextInput
                         style={styles.input}
@@ -2688,7 +760,7 @@ jobs:
                         value={address}
                         onChangeText={setAddress}
                       />
-                      <Button text="SAVE PROFILE" onPress={addPerson} />
+                      <Button text="SAVE PROFILE" onPress={savePerson} />
                       <Button text="CANCEL" secondary onPress={goBack} />
                       <View style={{ height: 40 }} />
                     </View>
@@ -2712,6 +784,8 @@ jobs:
                     </View>
                     <View style={styles.form}>
                       <Button text="OPEN PASSBOOK" onPress={() => openPassbook(selected)} />
+                      <Button text="EDIT PROFILE" secondary onPress={startEditProfile} />
+                      <Button text="DELETE ACCOUNT" danger onPress={deleteProfile} />
                       <Button text="BACK" secondary onPress={goBack} />
                       <View style={{ height: 40 }} />
                     </View>
@@ -2736,12 +810,10 @@ jobs:
                         {total >= 0 ? "Credit Balance" : "Debit Balance"}
                       </Text>
                     </View>
-
                     <View style={styles.form}>
                       <Text style={styles.formTitle}>
                         {editingEntryId ? "Edit Passbook Entry" : "New Passbook Entry"}
                       </Text>
-
                       <Text style={styles.label}>Document Type / Format</Text>
                       <View style={styles.row}>
                         <TouchableOpacity
@@ -2761,7 +833,6 @@ jobs:
                           </Text>
                         </TouchableOpacity>
                       </View>
-
                       <TextInput
                         style={styles.input}
                         placeholder={docFormat === "Estimate" ? "Estimate / Quotation No." : "Invoice Number (Alphanumeric)"}
@@ -2782,7 +853,6 @@ jobs:
                         value={amount}
                         onChangeText={setAmount}
                       />
-
                       <View style={styles.row}>
                         <TouchableOpacity
                           style={[styles.choice, entryType === "Credit" && styles.choiceActive]}
@@ -2801,7 +871,6 @@ jobs:
                           </Text>
                         </TouchableOpacity>
                       </View>
-
                       <Text style={styles.label}>Mode of Payment</Text>
                       <View style={styles.rowWrap}>
                         {["Cash", "UPI", "Bank", "Cheque", "Credit"].map((mode) => (
@@ -2816,7 +885,6 @@ jobs:
                           </TouchableOpacity>
                         ))}
                       </View>
-
                       {paymentMode !== "Cash" && paymentMode !== "Credit" ? (
                         <TextInput
                           style={styles.input}
@@ -2832,7 +900,6 @@ jobs:
                           onChangeText={setPaymentRef}
                         />
                       ) : null}
-
                       <TouchableOpacity style={styles.attach} onPress={chooseAttachment}>
                         <Text style={styles.attachText}>
                           {"📷 Photo & Crop / 📎 Attach " + (docFormat === "Estimate" ? "Estimate" : "Invoice")}
@@ -2846,7 +913,6 @@ jobs:
                           </TouchableOpacity>
                         </View>
                       ) : null}
-
                       <Button
                         text={editingEntryId ? "UPDATE ENTRY" : "SAVE ENTRY"}
                         onPress={addTransaction}
@@ -2855,7 +921,6 @@ jobs:
                         <Button text="CANCEL EDIT" secondary onPress={resetEntryForm} />
                       ) : null}
                     </View>
-
                     <Text style={styles.sectionTitle}>Transaction History</Text>
                     {(selected.entries || []).length === 0 ? (
                       <View style={styles.empty}>
@@ -2882,7 +947,6 @@ jobs:
                             {entry.attachment ? (
                               <Text style={styles.file}>{"📎 " + entry.attachment}</Text>
                             ) : null}
-
                             <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
                               <TouchableOpacity
                                 style={styles.actionBadge}
@@ -2943,7 +1007,6 @@ jobs:
                     </View>
                     <Text style={styles.subtitle}>Digital Business Ledger</Text>
                   </View>
-
                   <View style={styles.summary}>
                     <View style={styles.summaryBox}>
                       <Text style={styles.summaryLabel}>Customers</Text>
@@ -2954,7 +1017,6 @@ jobs:
                       <Text style={styles.summaryValue}>{"₹" + supplierBalanceTotal.toLocaleString("en-IN")}</Text>
                     </View>
                   </View>
-
                   <View style={styles.tabs}>
                     {["Customers", "Suppliers"].map((t) => (
                       <TouchableOpacity
@@ -2968,7 +1030,6 @@ jobs:
                       </TouchableOpacity>
                     ))}
                   </View>
-
                   <View style={styles.actionRow}>
                     <Button
                       text={"+ ADD " + (tab === "Customers" ? "CUSTOMER" : "SUPPLIER")}
@@ -2978,12 +1039,10 @@ jobs:
                       }}
                     />
                   </View>
-
                   <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>{tab}</Text>
                     <Text style={styles.count}>{currentList.length + " Contacts"}</Text>
                   </View>
-
                   {currentList.length === 0 ? (
                     <View style={styles.empty}>
                       <Text style={styles.emptyText}>{"No " + tab.toLowerCase() + " added yet."}</Text>
@@ -3003,7 +1062,6 @@ jobs:
                       </TouchableOpacity>
                     ))
                   )}
-
                   <View style={{ margin: 14, marginTop: 20 }}>
                     <TouchableOpacity onPress={() => setIsSettingPin(true)}>
                       <Text style={{ textAlign: "center", color: "#0759a8", fontWeight: "700" }}>
@@ -3153,5 +1211,5 @@ jobs:
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: vyapar-khata-release-v38
+          name: vyapar-khata-release-v47
           path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab

@@ -22,7 +22,7 @@ jobs:
         run: |
           npx --yes create-expo-app@latest vyapar-khata --template blank
           cd vyapar-khata
-          npx expo install expo-document-picker @react-native-async-storage/async-storage expo-contacts expo-image-picker
+          npx expo install expo-document-picker @react-native-async-storage/async-storage expo-contacts expo-image-picker expo-print expo-sharing
 
           node - <<'NODE'
           const fs = require("fs");
@@ -30,10 +30,10 @@ jobs:
           const app = JSON.parse(fs.readFileSync(p, "utf8"));
           app.expo.name = "Vyapar Khata";
           app.expo.slug = "vyapar-khata";
-          app.expo.version = "1.0.32";
+          app.expo.version = "1.0.36";
           app.expo.android = {
             package: "com.vyapar.khatabook.free",
-            versionCode: 32,
+            versionCode: 36,
             permissions: [
               "android.permission.READ_CONTACTS",
               "android.permission.CAMERA",
@@ -47,6 +47,7 @@ jobs:
           import React, { useEffect, useMemo, useState } from "react";
           import {
             Alert,
+            Linking,
             SafeAreaView,
             ScrollView,
             StatusBar,
@@ -60,8 +61,11 @@ jobs:
           import * as DocumentPicker from "expo-document-picker";
           import * as ImagePicker from "expo-image-picker";
           import * as Contacts from "expo-contacts";
+          import * as Print from "expo-print";
+          import * as Sharing from "expo-sharing";
 
           const STORE = "@vyapar_khata_data_v2";
+          const PIN_STORE = "@vyapar_khata_pin_v1";
 
           const today = () => {
             const d = new Date();
@@ -87,33 +91,49 @@ jobs:
             </View>
           );
 
-          const Button = ({ text, onPress, secondary }) => (
+          const Button = ({ text, onPress, secondary, danger }) => (
             <TouchableOpacity
-              style={[styles.btn, secondary && styles.btnSecondary]}
+              style={[
+                styles.btn,
+                secondary && styles.btnSecondary,
+                danger && styles.btnDanger
+              ]}
               onPress={onPress}
             >
-              <Text style={[styles.btnText, secondary && styles.btnTextSecondary]}>
+              <Text
+                style={[
+                  styles.btnText,
+                  secondary && styles.btnTextSecondary,
+                  danger && styles.btnTextDanger
+                ]}
+              >
                 {text}
               </Text>
             </TouchableOpacity>
           );
 
           export default function App() {
+            const [savedPin, setSavedPin] = useState(null);
+            const [isLocked, setIsLocked] = useState(true);
+            const [inputPin, setInputPin] = useState("");
+            const [newPin, setNewPin] = useState("");
+            const [confirmPin, setConfirmPin] = useState("");
+            const [isSettingPin, setIsSettingPin] = useState(false);
+
             const [screen, setScreen] = useState("home");
             const [tab, setTab] = useState("Customers");
             const [customers, setCustomers] = useState([]);
             const [suppliers, setSuppliers] = useState([]);
             const [selected, setSelected] = useState(null);
 
-            // Profile States
             const [name, setName] = useState("");
             const [phone, setPhone] = useState("");
             const [gst, setGst] = useState("");
             const [address, setAddress] = useState("");
             const [email, setEmail] = useState("");
 
-            // Passbook States
             const [editingEntryId, setEditingEntryId] = useState(null);
+            const [docFormat, setDocFormat] = useState("Invoice"); // 'Invoice' ya 'Estimate'
             const [invoiceNo, setInvoiceNo] = useState("");
             const [invoiceDate, setInvoiceDate] = useState(today());
             const [amount, setAmount] = useState("");
@@ -123,11 +143,20 @@ jobs:
             const [attachment, setAttachment] = useState(null);
 
             useEffect(() => {
-              loadData();
+              loadAuthAndData();
             }, []);
 
-            const loadData = async () => {
+            const loadAuthAndData = async () => {
               try {
+                const storedPin = await AsyncStorage.getItem(PIN_STORE);
+                if (storedPin) {
+                  setSavedPin(storedPin);
+                  setIsLocked(true);
+                } else {
+                  setIsSettingPin(true);
+                  setIsLocked(false);
+                }
+
                 const raw = await AsyncStorage.getItem(STORE);
                 if (raw) {
                   const data = JSON.parse(raw);
@@ -137,6 +166,33 @@ jobs:
               } catch (e) {
                 console.log(e);
               }
+            };
+
+            const handleUnlock = () => {
+              if (inputPin === savedPin) {
+                setIsLocked(false);
+                setInputPin("");
+              } else {
+                Alert.alert("Wrong PIN", "Galat Security PIN enter kiya hai.");
+                setInputPin("");
+              }
+            };
+
+            const handleSaveNewPin = async () => {
+              if (newPin.length !== 4 || isNaN(Number(newPin))) {
+                Alert.alert("Invalid PIN", "4-digit ka numerical PIN banayein.");
+                return;
+              }
+              if (newPin !== confirmPin) {
+                Alert.alert("Mismatch", "PIN aur Confirm PIN match nahi ho rahe.");
+                return;
+              }
+              await AsyncStorage.setItem(PIN_STORE, newPin);
+              setSavedPin(newPin);
+              setIsSettingPin(false);
+              setNewPin("");
+              setConfirmPin("");
+              Alert.alert("Success", "Security PIN set ho gaya hai.");
             };
 
             const saveData = async (c, s) => {
@@ -157,6 +213,7 @@ jobs:
 
             const resetEntryForm = () => {
               setEditingEntryId(null);
+              setDocFormat("Invoice");
               setInvoiceNo("");
               setInvoiceDate(today());
               setAmount("");
@@ -216,13 +273,50 @@ jobs:
 
             const startEditEntry = (entry) => {
               setEditingEntryId(entry.id);
+              setDocFormat(entry.docFormat || "Invoice");
               setInvoiceNo(entry.invoiceNo);
               setInvoiceDate(entry.invoiceDate);
               setAmount(String(entry.amount));
               setPaymentMode(entry.paymentMode || "Cash");
               setPaymentRef(entry.paymentRef || "");
               setEntryType(entry.type || "Credit");
-              setAttachment(entry.attachment ? { name: entry.attachment } : null);
+              setAttachment(
+                entry.attachment
+                  ? { name: entry.attachment, uri: entry.attachmentUri }
+                  : null
+              );
+            };
+
+            const deleteEntry = (entryId) => {
+              Alert.alert(
+                "Delete Entry",
+                "Kya aap is passbook entry ko delete karna chahte hain?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                      const updatedEntries = (selected.entries || []).filter((e) => e.id !== entryId);
+                      const list = tab === "Customers" ? customers : suppliers;
+                      const updated = list.map((p) =>
+                        p.id === selected.id ? { ...p, entries: updatedEntries } : p
+                      );
+                      if (tab === "Customers") {
+                        setCustomers(updated);
+                        await saveData(updated, suppliers);
+                      } else {
+                        setSuppliers(updated);
+                        await saveData(customers, updated);
+                      }
+                      const fresh = updated.find((x) => x.id === selected.id);
+                      setSelected(fresh);
+                      if (editingEntryId === entryId) resetEntryForm();
+                      Alert.alert("Deleted", "Entry delete ho gayi.");
+                    }
+                  }
+                ]
+              );
             };
 
             const addTransaction = async () => {
@@ -233,14 +327,14 @@ jobs:
               const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
 
               if (!cleanInvoice) {
-                Alert.alert("Required", "Invoice number enter karein.");
+                Alert.alert("Required", `${docFormat === "Estimate" ? "Estimate" : "Invoice"} number enter karein.`);
                 return;
               }
 
               if (!invoiceRegex.test(cleanInvoice)) {
                 Alert.alert(
-                  "Invalid Invoice",
-                  "Invoice number mein kam se kam 1 number hona chahiye aur sirf alphanumeric characters allow hain."
+                  "Invalid Number",
+                  "Number mein kam se kam 1 digit hona chahiye aur sirf alphanumeric characters allow hain."
                 );
                 return;
               }
@@ -256,28 +350,157 @@ jobs:
                   e.id === editingEntryId
                     ? {
                         ...e,
+                        docFormat,
                         invoiceNo: cleanInvoice,
                         invoiceDate: invoiceDate.trim() || today(),
                         amount: value,
                         paymentMode,
                         paymentRef: paymentRef.trim(),
                         type: entryType,
-                        attachment: attachment ? attachment.name : null
+                        attachment: attachment ? attachment.name : null,
+                        attachmentUri: attachment ? attachment.uri : null
                       }
                     : e
                 );
               } else {
                 const newEntry = {
                   id: Date.now().toString(),
+                  docFormat,
                   invoiceNo: cleanInvoice,
                   invoiceDate: invoiceDate.trim() || today(),
                   amount: value,
                   paymentMode,
                   paymentRef: paymentRef.trim(),
                   type: entryType,
-                  attachment: attachment ? attachment.name : null
+                  attachment: attachment ? attachment.name : null,
+                  attachmentUri: attachment ? attachment.uri : null
                 };
                 updatedEntries = [newEntry, ...(selected.entries || [])];
+              }
+
+              const list = tab === "Customers" ? customers : suppliers;
+              const updated = list.map((p) =>
+                p.id === selected.id ? { ...p, entries: updatedEntries } : p
+              );
+
+              if (tab === "Customers") {
+                setCustomers(updated);
+                await saveData(updated, suppliers);
+              } else {
+                setSuppliers(updated);
+                await saveData(customers, updated);
+              }
+
+              const fresh = updated.find((x) => x.id === selected.id);
+              setSelected(fresh);
+              resetEntryForm();
+              Alert.alert("Success", editingEntryId ? "Entry update ho gayi." : "Entry save ho gayi.");
+            };
+
+            const openCamera = async () => {
+              const { status } = await ImagePicker.requestCameraPermissionsAsync();
+              if (status !== "granted") {
+                Alert.alert("Permission", "Camera permission allow karein.");
+                return;
+              }
+              const result = await ImagePicker.launchCameraAsync({
+                allowsEditing: true,
+                quality: 0.8
+              });
+              if (!result.canceled && result.assets?.length) {
+                const uri = result.assets[0].uri;
+                const name = uri.split("/").pop() || "Camera_Invoice.jpg";
+                setAttachment({ name, uri });
+              }
+            };
+
+            const openGallery = async () => {
+              const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+              if (status !== "granted") {
+                Alert.alert("Permission", "Gallery permission allow karein.");
+                return;
+              }
+              const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                quality: 0.8
+              });
+              if (!result.canceled && result.assets?.length) {
+                const uri = result.assets[0].uri;
+                const name = uri.split("/").pop() || "Gallery_Invoice.jpg";
+                setAttachment({ name, uri });
+              }
+            };
+
+            const openDocument = async () => {
+              const result = await DocumentPicker.getDocumentAsync({
+                type: ["application/pdf", "image/*"],
+                copyToCacheDirectory: true
+              });
+              if (!result.canceled && result.assets?.length) {
+                setAttachment({
+                  name: result.assets[0].name,
+                  uri: result.assets[0].uri
+                });
+              }
+            };
+
+            const chooseAttachment = () => {
+              Alert.alert(
+                "Upload Document",
+                "Attach karne ka tarika chunein:",
+                [
+                  { text: "📷 Camera (Photo & Crop)", onPress: openCamera },
+                  { text: "🖼️ Gallery (Phone & Crop)", onPress: openGallery },
+                  { text: "📄 Document / PDF", onPress: openDocument },
+                  { text: "Cancel", style: "cancel" }
+                ]
+              );
+            };
+
+            const sendWhatsAppText = async (entry) => {
+              if (!selected.phone) {
+                Alert.alert("Missing Phone", "Customer ka phone number maujood nahi hai.");
+                return;
+              }
+              let clean = selected.phone.replace(/[^0-9]/g, "");
+              if (clean.length === 10) clean = "91" + clean;
+              const formatLabel = entry.docFormat === "Estimate" ? "ESTIMATE / QUOTATION" : "TAX INVOICE";
+              const msg = `*Vyapar Khata - ${formatLabel}*\n\nNamaste *${selected.name}*,\n\n📄 Ref No: ${entry.invoiceNo}\n📅 Date: ${entry.invoiceDate}\n💰 Amount: ₹${entry.amount.toLocaleString("en-IN")}\nType: ${entry.type}\nPayment: ${entry.paymentMode}${entry.paymentRef ? " (" + entry.paymentRef + ")" : ""}\n\nDhanyawad!`;
+              const url = `whatsapp://send?phone=${clean}&text=${encodeURIComponent(msg)}`;
+              try {
+                const can = await Linking.canOpenURL(url);
+                if (can) {
+                  await Linking.openURL(url);
+                } else {
+                  Alert.alert("WhatsApp Error", "WhatsApp install nahi hai.");
+                }
+              } catch (e) {
+                Alert.alert("Error", "WhatsApp open nahi ho paya.");
+              }
+            };
+
+            const shareEntryAsPdf = async (entry) => {
+              try {
+                const isEstimate = entry.docFormat === "Estimate";
+                const docTitle = isEstimate ? "ESTIMATE / QUOTATION" : "TAX INVOICE";
+                const refLabel = isEstimate ? "Estimate No:" : "Invoice No:";
+                const noteText = isEstimate
+                  ? "<p style='text-align: center; color: #b71c1c; font-size: 11px;'>* This is an Estimate / Quotation copy, not an official GST Tax Invoice.</p>"
+                  : "<p style='text-align: center; color: #666; font-size: 11px;'>* Original Tax Invoice copy generated via Vyapar Khata.</p>";
+
+                const imgTag = entry.attachmentUri
+                  ? `<div style="margin-top:20px; text-align:center;">
+                      <p style="font-weight:bold; color:#555;">Attached Document Copy:</p>
+                      <img src="${entry.attachmentUri}" style="max-width:92%; max-height:550px; border:1px solid #ccc; border-radius:8px;" />
+                     </div>`
+                  : "";
+
+                const html = `
+                  <html>
+                    <body style="font-family: Arial, sans-serif; padding: 25px; color: #222;">
+                      <div style="text-align: center; border-bottom: 2px solid ${isEstimate ? "#e65100" : "#0759a8"}; padding-bottom: 10px;">
+                        <h1 style="color: ${isEstimate ? "#e65100" : "#0759a8"}; margin: 0;">${docTitle}<ted.entries || [])];
               }
 
               const list = tab === "Customers" ? customers : suppliers;

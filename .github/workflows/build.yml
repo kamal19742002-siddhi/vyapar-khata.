@@ -23,7 +23,7 @@ jobs:
           npx --yes create-expo-app@latest vyapar-khata --template blank
           cd vyapar-khata
           
-          # Stable packages without native build conflicts
+          # Stable packages
           npx expo install expo-document-picker @react-native-async-storage/async-storage expo-contacts expo-image-picker
 
           node - <<'NODE'
@@ -32,10 +32,10 @@ jobs:
           const app = JSON.parse(fs.readFileSync(p, "utf8"));
           app.expo.name = "Vyapar Khata";
           app.expo.slug = "vyapar-khata";
-          app.expo.version = "1.0.38";
+          app.expo.version = "1.0.40";
           app.expo.android = {
             package: "com.vyapar.khatabook.free",
-            versionCode: 38,
+            versionCode: 40,
             permissions: [
               "android.permission.READ_CONTACTS",
               "android.permission.CAMERA",
@@ -58,7 +58,8 @@ jobs:
             Text,
             TextInput,
             TouchableOpacity,
-            View
+            View,
+            Modal
           } from "react-native";
           import AsyncStorage from "@react-native-async-storage/async-storage";
           import * as DocumentPicker from "expo-document-picker";
@@ -67,6 +68,7 @@ jobs:
 
           const STORE = "@vyapar_khata_data_v2";
           const PIN_STORE = "@vyapar_khata_pin_v1";
+          const MASTER_PIN_STORE = "@vyapar_khata_master_pin_v1";
 
           const today = () => {
             const d = new Date();
@@ -76,9 +78,12 @@ jobs:
             return day + "/" + mon + "/" + yr;
           };
 
-          const Header = ({ title }) => (
+          const Header = ({ title, rightElement }) => (
             <View style={styles.header}>
-              <Text style={styles.logoTitle}>{title}</Text>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={styles.logoTitle}>{title}</Text>
+                {rightElement}
+              </View>
             </View>
           );
 
@@ -111,27 +116,38 @@ jobs:
           );
 
           export default function App() {
+            // Security PINs
             const [savedPin, setSavedPin] = useState(null);
+            const [savedMasterPin, setSavedMasterPin] = useState("9999");
             const [isLocked, setIsLocked] = useState(true);
             const [inputPin, setInputPin] = useState("");
             const [newPin, setNewPin] = useState("");
             const [confirmPin, setConfirmPin] = useState("");
             const [isSettingPin, setIsSettingPin] = useState(false);
 
+            // Master Mode (Dual Ledger)
+            const [isMasterMode, setIsMasterMode] = useState(false);
+            const [showMasterModal, setShowMasterModal] = useState(false);
+            const [masterInputPin, setMasterInputPin] = useState("");
+
+            // Navigation
             const [screen, setScreen] = useState("home");
             const [tab, setTab] = useState("Customers");
             const [customers, setCustomers] = useState([]);
             const [suppliers, setSuppliers] = useState([]);
             const [selected, setSelected] = useState(null);
 
+            // Profile Form
+            const [editingPersonId, setEditingPersonId] = useState(null);
             const [name, setName] = useState("");
             const [phone, setPhone] = useState("");
             const [gst, setGst] = useState("");
             const [address, setAddress] = useState("");
             const [email, setEmail] = useState("");
 
+            // Transaction Form
             const [editingEntryId, setEditingEntryId] = useState(null);
-            const [docFormat, setDocFormat] = useState("Invoice");
+            const [docFormat, setDocFormat] = useState("Invoice"); // 'Invoice' (Tax Invoice) or 'Proforma' (Proforma / Quotation)
             const [invoiceNo, setInvoiceNo] = useState("");
             const [invoiceDate, setInvoiceDate] = useState(today());
             const [amount, setAmount] = useState("");
@@ -147,6 +163,9 @@ jobs:
             const loadAuthAndData = async () => {
               try {
                 const storedPin = await AsyncStorage.getItem(PIN_STORE);
+                const storedMaster = await AsyncStorage.getItem(MASTER_PIN_STORE);
+                if (storedMaster) setSavedMasterPin(storedMaster);
+
                 if (storedPin) {
                   setSavedPin(storedPin);
                   setIsLocked(true);
@@ -171,14 +190,14 @@ jobs:
                 setIsLocked(false);
                 setInputPin("");
               } else {
-                Alert.alert("Wrong PIN", "Galat Security PIN enter kiya hai.");
+                Alert.alert("Authentication Failed", "Galat Security PIN enter kiya gaya hai.");
                 setInputPin("");
               }
             };
 
             const handleSaveNewPin = async () => {
               if (newPin.length !== 4 || isNaN(Number(newPin))) {
-                Alert.alert("Invalid PIN", "4-digit ka numerical PIN banayein.");
+                Alert.alert("Invalid PIN", "4-digit numerical PIN enter karein.");
                 return;
               }
               if (newPin !== confirmPin) {
@@ -190,7 +209,19 @@ jobs:
               setIsSettingPin(false);
               setNewPin("");
               setConfirmPin("");
-              Alert.alert("Success", "Security PIN set ho gaya hai.");
+              Alert.alert("Success", "Security PIN configure ho gaya.");
+            };
+
+            const handleUnlockMasterMode = () => {
+              if (masterInputPin === savedMasterPin) {
+                setIsMasterMode(true);
+                setShowMasterModal(false);
+                setMasterInputPin("");
+                Alert.alert("Master View Unlocked", "Comprehensive Ledger (Official + Proforma / Quotation) active ho gaya hai.");
+              } else {
+                Alert.alert("Access Denied", "Galat Secret Master Code enter kiya hai.");
+                setMasterInputPin("");
+              }
             };
 
             const saveData = async (c, s) => {
@@ -201,6 +232,7 @@ jobs:
             };
 
             const resetProfile = () => {
+              setEditingPersonId(null);
               setName("");
               setPhone("");
               setGst("");
@@ -237,36 +269,111 @@ jobs:
                   }
                 }
               } catch (err) {
-                Alert.alert("Error", "Contact select nahi ho saka.");
+                Alert.alert("Error", "Contact access nahi ho saka.");
               }
             };
 
-            const addPerson = async () => {
+            const savePerson = async () => {
               if (!name.trim()) {
-                Alert.alert("Required", "Kripya naam enter karein.");
+                Alert.alert("Required", "Kripya party ka naam enter karein.");
                 return;
               }
-              const person = {
-                id: Date.now().toString(),
-                name: name.trim(),
-                phone: phone.trim(),
-                gst: gst.trim(),
-                address: address.trim(),
-                email: email.trim(),
-                entries: []
-              };
-              if (tab === "Customers") {
-                const updated = [person, ...customers];
-                setCustomers(updated);
-                await saveData(updated, suppliers);
+
+              const list = tab === "Customers" ? customers : suppliers;
+
+              if (editingPersonId) {
+                const updated = list.map((p) =>
+                  p.id === editingPersonId
+                    ? {
+                        ...p,
+                        name: name.trim(),
+                        phone: phone.trim(),
+                        gst: gst.trim(),
+                        address: address.trim(),
+                        email: email.trim()
+                      }
+                    : p
+                );
+
+                if (tab === "Customers") {
+                  setCustomers(updated);
+                  await saveData(updated, suppliers);
+                } else {
+                  setSuppliers(updated);
+                  await saveData(customers, updated);
+                }
+
+                const fresh = updated.find((x) => x.id === editingPersonId);
+                setSelected(fresh);
+                resetProfile();
+                setScreen("profile");
+                Alert.alert("Profile Updated", "Details safaltapoorvak update ho gayi hain.");
               } else {
-                const updated = [person, ...suppliers];
-                setSuppliers(updated);
-                await saveData(customers, updated);
+                const person = {
+                  id: Date.now().toString(),
+                  name: name.trim(),
+                  phone: phone.trim(),
+                  gst: gst.trim(),
+                  address: address.trim(),
+                  email: email.trim(),
+                  entries: []
+                };
+
+                if (tab === "Customers") {
+                  const updated = [person, ...customers];
+                  setCustomers(updated);
+                  await saveData(updated, suppliers);
+                } else {
+                  const updated = [person, ...suppliers];
+                  setSuppliers(updated);
+                  await saveData(customers, updated);
+                }
+
+                resetProfile();
+                setScreen("home");
+                Alert.alert("Saved", "Account profile safaltapoorvak jod li gayi.");
               }
-              resetProfile();
-              setScreen("home");
-              Alert.alert("Saved", (tab === "Customers" ? "Customer" : "Supplier") + " save ho gaya.");
+            };
+
+            const startEditProfile = () => {
+              if (!selected) return;
+              setEditingPersonId(selected.id);
+              setName(selected.name);
+              setPhone(selected.phone || "");
+              setGst(selected.gst || "");
+              setAddress(selected.address || "");
+              setEmail(selected.email || "");
+              setScreen("new");
+            };
+
+            const deleteProfile = () => {
+              if (!selected) return;
+              const typeName = tab === "Customers" ? "Customer" : "Supplier";
+              Alert.alert(
+                "Delete Account",
+                "Kya aap sach me " + selected.name + " ka poora account ledger delete karna chahte hain?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                      const list = tab === "Customers" ? customers : suppliers;
+                      const updated = list.filter((p) => p.id !== selected.id);
+                      if (tab === "Customers") {
+                        setCustomers(updated);
+                        await saveData(updated, suppliers);
+                      } else {
+                        setSuppliers(updated);
+                        await saveData(customers, updated);
+                      }
+                      setSelected(null);
+                      setScreen("home");
+                      Alert.alert("Deleted", typeName + " account delete ho gaya.");
+                    }
+                  }
+                ]
+              );
             };
 
             const startEditEntry = (entry) => {
@@ -278,6 +385,143 @@ jobs:
               setPaymentMode(entry.paymentMode || "Cash");
               setPaymentRef(entry.paymentRef || "");
               setEntryType(entry.type || "Credit");
+              setAttachment(
+                entry.attachment
+                  ? { name: entry.attachment, uri: entry.attachmentUri }
+                  : null
+              );
+            };
+
+            const deleteEntry = (entryId) => {
+              Alert.alert(
+                "Delete Entry",
+                "Kya aap is ledger entry ko delete karna chahte hain?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                      const updatedEntries = (selected.entries || []).filter((e) => e.id !== entryId);
+                      const list = tab === "Customers" ? customers : suppliers;
+                      const updated = list.map((p) =>
+                        p.id === selected.id ? { ...p, entries: updatedEntries } : p
+                      );
+                      if (tab === "Customers") {
+                        setCustomers(updated);
+                        await saveData(updated, suppliers);
+                      } else {
+                        setSuppliers(updated);
+                        await saveData(customers, updated);
+                      }
+                      const fresh = updated.find((x) => x.id === selected.id);
+                      setSelected(fresh);
+                      if (editingEntryId === entryId) resetEntryForm();
+                      Alert.alert("Deleted", "Entry remove kar di gayi.");
+                    }
+                  }
+                ]
+              );
+            };
+
+            const addTransaction = async () => {
+              if (!selected) return;
+              const value = Number(amount);
+              const cleanInvoice = invoiceNo.trim();
+
+              const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
+
+              if (!cleanInvoice) {
+                Alert.alert("Required", "Document reference number enter karein.");
+                return;
+              }
+
+              if (!invoiceRegex.test(cleanInvoice)) {
+                Alert.alert(
+                  "Invalid Reference",
+                  "Kam se kam 1 digit aur alphanumeric format hona aavashyak hai."
+                );
+                return;
+              }
+
+              if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
+                Alert.alert("Invalid Amount", "Valid commercial amount enter karein.");
+                return;
+              }
+
+              let updatedEntries;
+              if (editingEntryId) {
+                updatedEntries = (selected.entries || []).map((e) =>
+                  e.id === editingEntryId
+                    ? {
+                        ...e,
+                        docFormat: docFormat,
+                        invoiceNo: cleanInvoice,
+                        invoiceDate: invoiceDate.trim() || today(),
+                        amount: value,
+                        paymentMode: paymentMode,
+                        paymentRef: paymentRef.trim(),
+                        type: entryType,
+                        attachment: attachment ? attachment.name : null,
+                        attachmentUri: attachment ? attachment.uri : null
+                      }
+                    : e
+                );
+              } else {
+                const newEntry = {
+                  id: Date.now().toString(),
+                  docFormat: docFormat,
+                  invoiceNo: cleanInvoice,
+                  invoiceDate: invoiceDate.trim() || today(),
+                  amount: value,
+                  paymentMode: paymentMode,
+                  paymentRef: paymentRef.trim(),
+                  type: entryType,
+                  attachment: attachment ? attachment.name : null,
+                  attachmentUri: attachment ? attachment.uri : null
+                };
+                updatedEntries = [newEntry, ...(selected.entries || [])];
+              }
+
+              const list = tab === "Customers" ? customers : suppliers;
+              const updated = list.map((p) =>
+                p.id === selected.id ? { ...p, entries: updatedEntries } : p
+              );
+
+              if (tab === "Customers") {
+                setCustomers(updated);
+                await saveData(updated, suppliers);
+              } else {
+                setSuppliers(updated);
+                await saveData(customers, updated);
+              }
+
+              const fresh = updated.find((x) => x.id === selected.id);
+              setSelected(fresh);
+              resetEntryForm();
+              Alert.alert("Success", editingEntryId ? "Ledger record updated." : "Ledger record saved.");
+            };
+
+            const openCamera = async () => {
+              const { status } = await ImagePicker.requestCameraPermissionsAsync();
+              if (status !== "granted") {
+                Alert.alert("Permission", "Camera permission allow karein.");
+                return;
+              }
+              const result = await ImagePicker.launchCameraAsync({
+                allowsEditing: true,
+                quality: 0.8
+              });
+              if (!result.canceled && result.assets && result.assets.length > 0) {
+                const uri = result.assets[0].uri;
+                const name = uri.split("/").pop() || "Scanned_Document.jpg";
+                setAttachment({ name, uri });
+              }
+            };
+
+            const openGallery = async () => {
+              const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+              if (status !== "grantedit");
               setAttachment(
                 entry.attachment
                   ? { name: entry.attachment, uri: entry.attachmentUri }

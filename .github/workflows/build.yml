@@ -45,10 +45,10 @@ jobs:
           const app = JSON.parse(fs.readFileSync("app.json", "utf8"));
           app.expo.name = "Vyapar Khata";
           app.expo.slug = "vyapar-khata";
-          app.expo.version = "1.0.51";
+          app.expo.version = "1.0.52";
           app.expo.android = {
             package: "com.vyapar.khatabook.free",
-            versionCode: 51,
+            versionCode: 52,
             permissions: [
               "android.permission.READ_CONTACTS",
               "android.permission.WRITE_CONTACTS",
@@ -271,6 +271,251 @@ jobs:
               setInvoiceDate(today());
               setAmount("");
               setPaymentMode("Cash");
+              setPaymentRef("");
+              setEntryType("Credit");
+              setAttachment(null);
+            };
+
+            const cleanPhoneNumber = (raw) => {
+              if (!raw) return "";
+              let num = String(raw).replace(/[^0-9]/g, "");
+              if (num.length > 10) {
+                if (num.startsWith("91") && num.length === 12) {
+                  num = num.slice(2);
+                } else if (num.startsWith("0") && num.length === 11) {
+                  num = num.slice(1);
+                } else {
+                  num = num.slice(-10);
+                }
+              }
+              return num;
+            };
+
+            const pickContact = async () => {
+              try {
+                const { status } = await Contacts.requestPermissionsAsync();
+                if (status !== "granted") {
+                  Alert.alert("Permission", "Phonebook se number lene ke liye Contacts permission allow karein.");
+                  return;
+                }
+
+                const contact = await Contacts.presentContactPickerAsync();
+                if (!contact) return;
+
+                if (contact.name) {
+                  setName(contact.name);
+                }
+
+                let finalNumber = "";
+
+                if (contact.phoneNumbers && Array.isArray(contact.phoneNumbers) && contact.phoneNumbers.length > 0) {
+                  finalNumber = contact.phoneNumbers[0].number || "";
+                } else if (contact.phones && Array.isArray(contact.phones) && contact.phones.length > 0) {
+                  finalNumber = contact.phones[0].number || "";
+                }
+
+                if (!finalNumber && contact.id) {
+                  const full = await Contacts.getContactByIdAsync(contact.id, [
+                    Contacts.Fields.PhoneNumbers,
+                    Contacts.Fields.Name
+                  ]);
+                  if (full && full.phoneNumbers && full.phoneNumbers.length > 0) {
+                    finalNumber = full.phoneNumbers[0].number || "";
+                  }
+                }
+
+                if (finalNumber) {
+                  setPhone(cleanPhoneNumber(finalNumber));
+                } else {
+                  Alert.alert("Notice", "Is contact profile me phone number saved nahi mila.");
+                }
+              } catch (err) {
+                console.log(err);
+                Alert.alert("Notice", "Direct pick nahi hua. Kripya number direct type karein.");
+              }
+            };
+
+            const savePerson = async () => {
+              if (!name.trim()) {
+                Alert.alert("Required", "Kripya naam enter karein.");
+                return;
+              }
+              const list = tab === "Customers" ? customers : suppliers;
+              if (editingPersonId) {
+                const updated = list.map((p) =>
+                  p.id === editingPersonId
+                    ? {
+                        ...p,
+                        name: name.trim(),
+                        phone: phone.trim(),
+                        gst: gst.trim(),
+                        address: address.trim(),
+                        email: email.trim()
+                      }
+                    : p
+                );
+                if (tab === "Customers") {
+                  setCustomers(updated);
+                  await saveData(updated, suppliers);
+                } else {
+                  setSuppliers(updated);
+                  await saveData(customers, updated);
+                }
+                const fresh = updated.find((x) => x.id === editingPersonId);
+                setSelected(fresh);
+                resetProfile();
+                setScreen("profile");
+                Alert.alert("Updated", "Account update ho gaya.");
+              } else {
+                const person = {
+                  id: Date.now().toString(),
+                  name: name.trim(),
+                  phone: phone.trim(),
+                  gst: gst.trim(),
+                  address: address.trim(),
+                  email: email.trim(),
+                  entries: []
+                };
+                if (tab === "Customers") {
+                  const updated = [person, ...customers];
+                  setCustomers(updated);
+                  await saveData(updated, suppliers);
+                } else {
+                  const updated = [person, ...suppliers];
+                  setSuppliers(updated);
+                  await saveData(customers, updated);
+                }
+                resetProfile();
+                setScreen("home");
+                Alert.alert("Saved", "Account profile save ho gayi.");
+              }
+            };
+
+            const startEditProfile = () => {
+              if (!selected) return;
+              setEditingPersonId(selected.id);
+              setName(selected.name);
+              setPhone(selected.phone || "");
+              setGst(selected.gst || "");
+              setAddress(selected.address || "");
+              setEmail(selected.email || "");
+              setScreen("new");
+            };
+
+            const deleteProfile = () => {
+              if (!selected) return;
+              const typeName = tab === "Customers" ? "Customer" : "Supplier";
+              Alert.alert(
+                "Delete Account",
+                "Kya aap sach me " + selected.name + " ka poora account delete karna chahte hain?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                      const list = tab === "Customers" ? customers : suppliers;
+                      const updated = list.filter((p) => p.id !== selected.id);
+                      if (tab === "Customers") {
+                        setCustomers(updated);
+                        await saveData(updated, suppliers);
+                      } else {
+                        setSuppliers(updated);
+                        await saveData(customers, updated);
+                      }
+                      setSelected(null);
+                      setScreen("home");
+                      Alert.alert("Deleted", typeName + " delete ho gaya.");
+                    }
+                  }
+                ]
+              );
+            };
+
+            const startEditEntry = (entry) => {
+              setEditingEntryId(entry.id);
+              setDocFormat(entry.docFormat || "Invoice");
+              setInvoiceNo(entry.invoiceNo);
+              setInvoiceDate(entry.invoiceDate);
+              setAmount(String(entry.amount));
+              setPaymentMode(entry.paymentMode || "Cash");
+              setPaymentRef(entry.paymentRef || "");
+              setEntryType(entry.type || "Credit");
+              setAttachment(
+                entry.attachment
+                  ? { name: entry.attachment, uri: entry.attachmentUri }
+                  : null
+              );
+            };
+
+            const deleteEntry = (entryId) => {
+              Alert.alert(
+                "Delete Entry",
+                "Kya aap is entry ko delete karna chahte hain?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                      const updatedEntries = (selected.entries || []).filter((e) => e.id !== entryId);
+                      const list = tab === "Customers" ? customers : suppliers;
+                      const updated = list.map((p) =>
+                        p.id === selected.id ? { ...p, entries: updatedEntries } : p
+                      );
+                      if (tab === "Customers") {
+                        setCustomers(updated);
+                        await saveData(updated, suppliers);
+                      } else {
+                        setSuppliers(updated);
+                        await saveData(customers, updated);
+                      }
+                      const fresh = updated.find((x) => x.id === selected.id);
+                      setSelected(fresh);
+                      if (editingEntryId === entryId) resetEntryForm();
+                      Alert.alert("Deleted", "Entry remove kar di gayi.");
+                    }
+                  }
+                ]
+              );
+            };
+
+            const addTransaction = async () => {
+              if (!selected) return;
+              const value = Number(amount);
+              const cleanInvoice = invoiceNo.trim();
+              const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
+              if (!cleanInvoice) {
+                Alert.alert("Required", "Document / Invoice number enter karein.");
+                return;
+              }
+              if (!invoiceRegex.test(cleanInvoice)) {
+                Alert.alert(
+                  "Invalid Reference",
+                  "Kam se kam 1 number hona chahiye aur sirf alphanumeric characters allow hain."
+                );
+                return;
+              }
+              if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
+                Alert.alert("Invalid Amount", "Valid amount enter karein.");
+                return;
+              }
+              let updatedEntries;
+              if (editingEntryId) {
+                updatedEntries = (selected.entries || []).map((e) =>
+                  e.id === editingEntryId
+                    ? {
+                        ...e,
+                        docFormat: docFormat,
+                        invoiceNo: cleanInvoice,
+                        invoiceDate: invoiceDate.trim() || today(),
+                        amount: value,
+                        paymentMode: paymentMode,
+                        paymentRef: paymentRef.trim(),
+                        type: entryType,
+                        attachment: attachment ? attachment.name : null,
+                        attachmentUri: attachment ? attachment.uri : null
+    tMode("Cash");
               setPaymentRef("");
               setEntryType("Credit");
               setAttachment(null);

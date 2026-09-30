@@ -20,15 +20,22 @@ jobs:
 
       - name: Create and Configure App
         run: |
-          # 1. Initialize Blank Expo App pinned to stable SDK
-          npx --yes create-expo-app@latest vyapar-khata --template blank@sdk-51 --no-install
+          # 1. Initialize Blank Project
+          npx --yes create-expo-app@latest vyapar-khata --template blank --no-install
           cd vyapar-khata
 
           # 2. Install Stable Core Dependencies
           npm install
-          npx expo install @react-native-async-storage/async-storage expo-contacts expo-image-picker expo-document-picker babel-preset-expo
+          npx expo install @react-native-async-storage/async-storage expo-contacts expo-image-picker expo-document-picker babel-preset-expo @expo/metro-config
 
-          # 3. Create explicit babel.config.js to prevent Metro bundle crash
+          # 3. Create Explicit metro.config.js
+          cat > metro.config.js <<'METRO'
+          const { getDefaultConfig } = require('expo/metro-config');
+          const config = getDefaultConfig(__dirname);
+          module.exports = config;
+          METRO
+
+          # 4. Create Explicit babel.config.js
           cat > babel.config.js <<'BABEL'
           module.exports = function(api) {
             api.cache(true);
@@ -38,21 +45,16 @@ jobs:
           };
           BABEL
 
-          # 4. Configure package.json and app.json
+          # 5. Configure app.json
           node - <<'NODE'
           const fs = require("fs");
-          
-          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-          pkg.main = "index.js";
-          fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
-
           const app = JSON.parse(fs.readFileSync("app.json", "utf8"));
           app.expo.name = "Vyapar Khata";
           app.expo.slug = "vyapar-khata";
-          app.expo.version = "1.0.43";
+          app.expo.version = "1.0.45";
           app.expo.android = {
             package: "com.vyapar.khatabook.free",
-            versionCode: 43,
+            versionCode: 45,
             permissions: [
               "android.permission.READ_CONTACTS",
               "android.permission.CAMERA",
@@ -62,14 +64,7 @@ jobs:
           fs.writeFileSync("app.json", JSON.stringify(app, null, 2));
           NODE
 
-          # 5. Create entry file
-          cat > index.js <<'INDEXJS'
-          import { registerRootComponent } from 'expo';
-          import App from './App';
-          registerRootComponent(App);
-          INDEXJS
-
-          # 6. Application Source Code
+          # 6. Application Source Code (Syntax Checked & Fixed)
           cat > App.js <<'APPJS'
           import React, { useEffect, useMemo, useState } from "react";
           import {
@@ -210,7 +205,7 @@ jobs:
                 setIsLocked(false);
                 setInputPin("");
               } else {
-                Alert.alert("Authentication Failed", "Galat Security PIN.");
+                Alert.alert("Authentication Failed", "Galat Security PIN enter kiya hai.");
                 setInputPin("");
               }
             };
@@ -263,15 +258,273 @@ jobs:
 
             const resetEntryForm = () => {
               setEditingEntryId(null);
-              // Automatic Classification: GST hone par Tax Invoice, na hone par Proforma Quotation
-              const autoType = (selected && selected.gst && selected.gst.trim().length >= 5) ? "Invoice" : "Proforma";
-              setDocFormat(autoType);
+              // Automatic Classification: GST number hone par Tax Invoice (Pakka), warna Proforma (Kaccha)
+              const hasGst = selected && selected.gst && selected.gst.trim().length >= 5;
+              setDocFormat(hasGst ? "Invoice" : "Proforma");
               setInvoiceNo("");
               setInvoiceDate(today());
               setAmount("");
               setPaymentMode("Cash");
               setPaymentRef("");
               setEntryType("Credit");
+              setAttachment(null);
+            };
+
+            const pickContact = async () => {
+              try {
+                const { status } = await Contacts.requestPermissionsAsync();
+                if (status !== "granted") {
+                  Alert.alert("Permission Required", "Contacts permission allow karein.");
+                  return;
+                }
+                const contact = await Contacts.presentContactPickerAsync();
+                if (contact) {
+                  if (contact.name) setName(contact.name);
+                  if (contact.phoneNumbers && contact.phoneNumbers.length > 0) {
+                    const clean = contact.phoneNumbers[0].number.replace(/[^0-9+]/g, "");
+                    setPhone(clean);
+                  }
+                }
+              } catch (err) {
+                Alert.alert("Error", "Contact select nahi ho saka.");
+              }
+            };
+
+            const savePerson = async () => {
+              if (!name.trim()) {
+                Alert.alert("Required", "Kripya naam enter karein.");
+                return;
+              }
+
+              const list = tab === "Customers" ? customers : suppliers;
+
+              if (editingPersonId) {
+                const updated = list.map((p) =>
+                  p.id === editingPersonId
+                    ? {
+                        ...p,
+                        name: name.trim(),
+                        phone: phone.trim(),
+                        gst: gst.trim(),
+                        address: address.trim(),
+                        email: email.trim()
+                      }
+                    : p
+                );
+
+                if (tab === "Customers") {
+                  setCustomers(updated);
+                  await saveData(updated, suppliers);
+                } else {
+                  setSuppliers(updated);
+                  await saveData(customers, updated);
+                }
+
+                const fresh = updated.find((x) => x.id === editingPersonId);
+                setSelected(fresh);
+                resetProfile();
+                setScreen("profile");
+                Alert.alert("Updated", "Account update ho gaya.");
+              } else {
+                const person = {
+                  id: Date.now().toString(),
+                  name: name.trim(),
+                  phone: phone.trim(),
+                  gst: gst.trim(),
+                  address: address.trim(),
+                  email: email.trim(),
+                  entries: []
+                };
+
+                if (tab === "Customers") {
+                  const updated = [person, ...customers];
+                  setCustomers(updated);
+                  await saveData(updated, suppliers);
+                } else {
+                  const updated = [person, ...suppliers];
+                  setSuppliers(updated);
+                  await saveData(customers, updated);
+                }
+
+                resetProfile();
+                setScreen("home");
+                Alert.alert("Saved", "Account profile save ho gayi.");
+              }
+            };
+
+            const startEditProfile = () => {
+              if (!selected) return;
+              setEditingPersonId(selected.id);
+              setName(selected.name);
+              setPhone(selected.phone || "");
+              setGst(selected.gst || "");
+              setAddress(selected.address || "");
+              setEmail(selected.email || "");
+              setScreen("new");
+            };
+
+            const deleteProfile = () => {
+              if (!selected) return;
+              const typeName = tab === "Customers" ? "Customer" : "Supplier";
+              Alert.alert(
+                "Delete Account",
+                "Kya aap sach me " + selected.name + " ka account delete karna chahte hain?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                      const list = tab === "Customers" ? customers : suppliers;
+                      const updated = list.filter((p) => p.id !== selected.id);
+                      if (tab === "Customers") {
+                        setCustomers(updated);
+                        await saveData(updated, suppliers);
+                      } else {
+                        setSuppliers(updated);
+                        await saveData(customers, updated);
+                      }
+                      setSelected(null);
+                      setScreen("home");
+                      Alert.alert("Deleted", typeName + " delete ho gaya.");
+                    }
+                  }
+                ]
+              );
+            };
+
+            const startEditEntry = (entry) => {
+              setEditingEntryId(entry.id);
+              setDocFormat(entry.docFormat || "Invoice");
+              setInvoiceNo(entry.invoiceNo);
+              setInvoiceDate(entry.invoiceDate);
+              setAmount(String(entry.amount));
+              setPaymentMode(entry.paymentMode || "Cash");
+              setPaymentRef(entry.paymentRef || "");
+              setEntryType(entry.type || "Credit");
+              setAttachment(
+                entry.attachment
+                  ? { name: entry.attachment, uri: entry.attachmentUri }
+                  : null
+              );
+            };
+
+            const deleteEntry = (entryId) => {
+              Alert.alert(
+                "Delete Entry",
+                "Kya aap is entry ko delete karna chahte hain?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                      const updatedEntries = (selected.entries || []).filter((e) => e.id !== entryId);
+                      const list = tab === "Customers" ? customers : suppliers;
+                      const updated = list.map((p) =>
+                        p.id === selected.id ? { ...p, entries: updatedEntries } : p
+                      );
+                      if (tab === "Customers") {
+                        setCustomers(updated);
+                        await saveData(updated, suppliers);
+                      } else {
+                        setSuppliers(updated);
+                        await saveData(customers, updated);
+                      }
+                      const fresh = updated.find((x) => x.id === selected.id);
+                      setSelected(fresh);
+                      if (editingEntryId === entryId) resetEntryForm();
+                      Alert.alert("Deleted", "Entry remove ho gayi.");
+                    }
+                  }
+                ]
+              );
+            };
+
+            const addTransaction = async () => {
+              if (!selected) return;
+              const value = Number(amount);
+              const cleanInvoice = invoiceNo.trim();
+
+              const invoiceRegex = /^(?=.*\d)[a-zA-Z0-9/-]+$/;
+
+              if (!cleanInvoice) {
+                Alert.alert("Required", "Document reference number enter karein.");
+                return;
+              }
+
+              if (!invoiceRegex.test(cleanInvoice)) {
+                Alert.alert(
+                  "Invalid Reference",
+                  "Kam se kam 1 number hona chahiye aur sirf alphanumeric characters allow hain."
+                );
+                return;
+              }
+
+              if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
+                Alert.alert("Invalid Amount", "Valid amount enter karein.");
+                return;
+              }
+
+              let updatedEntries;
+              if (editingEntryId) {
+                updatedEntries = (selected.entries || []).map((e) =>
+                  e.id === editingEntryId
+                    ? {
+                        ...e,
+                        docFormat: docFormat,
+                        invoiceNo: cleanInvoice,
+                        invoiceDate: invoiceDate.trim() || today(),
+                        amount: value,
+                        paymentMode: paymentMode,
+                        paymentRef: paymentRef.trim(),
+                        type: entryType,
+                        attachment: attachment ? attachment.name : null,
+                        attachmentUri: attachment ? attachment.uri : null
+                      }
+                    : e
+                );
+              } else {
+                const newEntry = {
+                  id: Date.now().toString(),
+                  docFormat: docFormat,
+                  invoiceNo: cleanInvoice,
+                  invoiceDate: invoiceDate.trim() || today(),
+                  amount: value,
+                  paymentMode: paymentMode,
+                  paymentRef: paymentRef.trim(),
+                  type: entryType,
+                  attachment: attachment ? attachment.name : null,
+                  attachmentUri: attachment ? attachment.uri : null
+                };
+                updatedEntries = [newEntry, ...(selected.entries || [])];
+              }
+
+              const list = tab === "Customers" ? customers : suppliers;
+              const updated = list.map((p) =>
+                p.id === selected.id ? { ...p, entries: updatedEntries } : p
+              );
+
+              if (tab === "Customers") {
+                setCustomers(updated);
+                await saveData(updated, suppliers);
+              } else {
+                setSuppliers(updated);
+                await saveData(customers, updated);
+              }
+
+              const fresh = updated.find((x) => x.id === selected.id);
+              setSelected(fresh);
+              resetEntryForm();
+              Alert.alert("Success", editingEntryId ? "Record update ho gaya." : "Record save ho gaya.");
+            };
+
+            const openCamera = async () => {
+              const { status } = await ImagePicker.requestCameraPermissionsAsync();
+              if (status !== "granted") {
+                Alert.alert("Permission", "Camera permission allow karein.");
+                return;
+            pe("Credit");
               setAttachment(null);
             };
 

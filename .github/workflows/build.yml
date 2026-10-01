@@ -25,11 +25,9 @@ jobs:
           java-version: '17'
 
       - name: Install Dependencies
-        working-directory: vyapar-khata
         run: npm install
 
       - name: Auto-Patch Expo Modules Core for API 36
-        working-directory: vyapar-khata
         run: |
           FILE=$(find node_modules/ -path "*/expo/modules/adapters/react/ModuleRegistryAdapter.kt" 2>/dev/null | head -n 1)
           if [ -n "$FILE" ] && [ -f "$FILE" ]; then
@@ -41,7 +39,6 @@ jobs:
           echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
 
       - name: Configure Keystore and Signing
-        working-directory: vyapar-khata
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
@@ -74,11 +71,10 @@ jobs:
           EOF
 
       - name: Grant Execute Permission for Gradlew
-        working-directory: vyapar-khata/android
-        run: chmod +x gradlew
+        run: chmod +x android/gradlew
 
       - name: Build Android App Bundle (AAB)
-        working-directory: vyapar-khata/android
+        working-directory: android
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -89,4 +85,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-release.aab
-          path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab
+          path: android/app/build/outputs/bundle/release/*.aab

@@ -1,7 +1,8 @@
-
 name: Build Vyapar Khata AAB
 
 on:
+  push:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -9,674 +10,128 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Setup Java
+      - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: "17"
+          distribution: 'zulu'
+          java-version: '17'
 
-      - name: Create Expo App
+      - name: Locate Project Root
+        id: set-path
         run: |
-          npx --yes create-expo-app@latest vyapar-khata --template blank@sdk-54 --no-install
-          cd vyapar-khata
-
-          npm install
-
-          npx expo install @react-native-async-storage/async-storage
-          npx expo install expo-build-properties
-
-          cat > app.json <<'JSON'
-          {
-            "expo": {
-              "name": "Vyapar Khata",
-              "slug": "vyapar-khata",
-              "version": "1.0.54",
-              "android": {
-                "package": "com.vyapar.khatabook.free",
-                "versionCode": 54
-              },
-              "plugins": [
-                [
-                  "expo-build-properties",
-                  {
-                    "android": {
-                      "compileSdkVersion": 36,
-                      "targetSdkVersion": 36,
-                      "buildToolsVersion": "36.0.0"
-                    }
-                  }
-                ]
-              ]
-            }
-          }
-          JSON
-
-          cat > metro.config.js <<'METRO'
-          const { getDefaultConfig } = require("expo/metro-config");
-
-          const config = getDefaultConfig(__dirname);
-
-          module.exports = config;
-          METRO
-
-          cat > babel.config.js <<'BABEL'
-          module.exports = function(api) {
-            api.cache(true);
-
-            return {
-              presets: ["babel-preset-expo"]
-            };
-          };
-          BABEL
-
-          cat > App.js <<'APPJS'
-          import React, {useEffect, useState} from "react";
-          import {
-            View,
-            Text,
-            TextInput,
-            TouchableOpacity,
-            ScrollView,
-            StyleSheet,
-            Alert,
-            SafeAreaView,
-            StatusBar
-          } from "react-native";
-
-          import AsyncStorage from "@react-native-async-storage/async-storage";
-
-          const KEY = "DUAL_LEDGER_DATA";
-          const MASTER = "9999";
-
-          export default function App() {
-
-            const [data, setData] = useState([]);
-            const [name, setName] = useState("");
-            const [invoice, setInvoice] = useState("");
-            const [original, setOriginal] = useState("");
-            const [second, setSecond] = useState("");
-            const [master, setMaster] = useState(false);
-            const [mpin, setMpin] = useState("");
-
-            useEffect(function() {
-              load();
-            }, []);
-
-            async function load() {
-              try {
-                const x = await AsyncStorage.getItem(KEY);
-
-                if (x) {
-                  setData(JSON.parse(x));
-                }
-              } catch (e) {
-                console.log(e);
-              }
-            }
-
-            async function save(list) {
-              setData(list);
-
-              await AsyncStorage.setItem(
-                KEY,
-                JSON.stringify(list)
-              );
-            }
-
-            function add() {
-
-              if (
-                !name.trim() ||
-                !invoice.trim() ||
-                !original.trim()
-              ) {
-                Alert.alert(
-                  "Required",
-                  "Customer Name, Invoice aur Original Amount bharein"
-                );
-
-                return;
-              }
-
-              const item = {
-                id: Date.now(),
-                name: name.trim(),
-                invoice: invoice.trim(),
-                original: Number(original),
-                second: Number(second || 0)
-              };
-
-              save([item].concat(data));
-
-              setName("");
-              setInvoice("");
-              setOriginal("");
-              setSecond("");
-
-              Alert.alert(
-                "Success",
-                "Record add ho gaya"
-              );
-            }
-
-            function openMaster() {
-
-              if (mpin === MASTER) {
-
-                setMaster(true);
-                setMpin("");
-
-                Alert.alert(
-                  "Unlocked",
-                  "Master Ledger active ho gaya"
-                );
-
-              } else {
-
-                Alert.alert(
-                  "Access Denied",
-                  "Wrong Master PIN"
-                );
-
-                setMpin("");
-              }
-            }
-
-            function deleteItem(id) {
-
-              Alert.alert(
-                "Delete",
-                "Kya aap is entry ko delete karna chahte hain?",
-                [
-                  {
-                    text: "Cancel",
-                    style: "cancel"
-                  },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: function() {
-
-                      const filtered = data.filter(
-                        function(x) {
-                          return x.id !== id;
-                        }
-                      );
-
-                      save(filtered);
-                    }
-                  }
-                ]
-              );
-            }
-
-            return (
-              <SafeAreaView style={s.page}>
-
-                <StatusBar
-                  barStyle="light-content"
-                  backgroundColor="#0759a8"
-                />
-
-                <ScrollView>
-
-                  <View style={s.head}>
-
-                    <Text style={s.logo}>
-                      Vyapar Khata
-                    </Text>
-
-                    <Text style={s.sub}>
-                      {master
-                        ? "MASTER CONSOLIDATED VIEW"
-                        : "OFFICIAL REGULAR VIEW"}
-                    </Text>
-
-                  </View>
-
-                  {!master ? (
-
-                    <View style={s.box}>
-
-                      <Text style={s.title}>
-                        Master Access
-                      </Text>
-
-                      <TextInput
-                        style={s.input}
-                        placeholder="Master PIN dalein"
-                        keyboardType="numeric"
-                        secureTextEntry={true}
-                        value={mpin}
-                        onChangeText={setMpin}
-                      />
-
-                      <TouchableOpacity
-                        style={s.purple}
-                        onPress={openMaster}
-                      >
-                        <Text style={s.white}>
-                          OPEN MASTER
-                        </Text>
-                      </TouchableOpacity>
-
-                    </View>
-
-                  ) : (
-
-                    <View style={s.box}>
-
-                      <TouchableOpacity
-                        style={s.close}
-                        onPress={function() {
-                          setMaster(false);
-                        }}
-                      >
-
-                        <Text style={s.closeText}>
-                          CLOSE MASTER MODE
-                        </Text>
-
-                      </TouchableOpacity>
-
-                    </View>
-
-                  )}
-
-                  <View style={s.box}>
-
-                    <Text style={s.title}>
-                      New Invoice
-                    </Text>
-
-                    <TextInput
-                      style={s.input}
-                      placeholder="Customer Name"
-                      value={name}
-                      onChangeText={setName}
-                    />
-
-                    <TextInput
-                      style={s.input}
-                      placeholder="Invoice Number"
-                      value={invoice}
-                      onChangeText={setInvoice}
-                    />
-
-                    <TextInput
-                      style={s.input}
-                      placeholder="Original Invoice Amount"
-                      keyboardType="numeric"
-                      value={original}
-                      onChangeText={setOriginal}
-                    />
-
-                    {master ? (
-
-                      <TextInput
-                        style={s.input}
-                        placeholder="Second Secret Amount"
-                        keyboardType="numeric"
-                        value={second}
-                        onChangeText={setSecond}
-                      />
-
-                    ) : null}
-
-                    <TouchableOpacity
-                      style={s.blue}
-                      onPress={add}
-                    >
-
-                      <Text style={s.white}>
-                        SAVE INVOICE
-                      </Text>
-
-                    </TouchableOpacity>
-
-                  </View>
-
-                  <Text style={s.list}>
-                    Invoice Records ({data.length})
-                  </Text>
-
-                  {data.length === 0 ? (
-
-                    <View style={s.box}>
-
-                      <Text style={s.empty}>
-                        Abhi koi invoice nahi hai
-                      </Text>
-
-                    </View>
-
-                  ) : (
-
-                    data.map(function(x) {
-
-                      const total =
-                        Number(x.original || 0) +
-                        Number(x.second || 0);
-
-                      return (
-
-                        <View
-                          style={s.card}
-                          key={x.id}
-                        >
-
-                          <View style={s.row}>
-
-                            <Text style={s.name}>
-                              {x.name}
-                            </Text>
-
-                            <TouchableOpacity
-                              onPress={function() {
-                                deleteItem(x.id);
-                              }}
-                            >
-
-                              <Text style={s.delete}>
-                                Delete
-                              </Text>
-
-                            </TouchableOpacity>
-
-                          </View>
-
-                          <Text style={s.invoice}>
-                            Invoice: {x.invoice}
-                          </Text>
-
-                          <Text style={s.green}>
-                            Original: Rs. {Number(
-                              x.original
-                            ).toLocaleString("en-IN")}
-                          </Text>
-
-                          {!master ? (
-
-                            <Text style={s.red}>
-                              Original Due: Rs. {Number(
-                                x.original
-                              ).toLocaleString("en-IN")}
-                            </Text>
-
-                          ) : (
-
-                            <View style={s.secret}>
-
-                              <Text style={s.purpleText}>
-                                Second Amount: Rs. {Number(
-                                  x.second || 0
-                                ).toLocaleString("en-IN")}
-                              </Text>
-
-                              <Text style={s.total}>
-                                TOTAL DUE: Rs. {total.toLocaleString(
-                                  "en-IN"
-                                )}
-                              </Text>
-
-                            </View>
-
-                          )}
-
-                        </View>
-                      );
-                    })
-                  )}
-
-                  <View style={{height: 60}} />
-
-                </ScrollView>
-
-              </SafeAreaView>
-            );
-          }
-
-          const s = StyleSheet.create({
-
-            page: {
-              flex: 1,
-              backgroundColor: "#f3f6fa"
-            },
-
-            head: {
-              backgroundColor: "#0759a8",
-              padding: 20
-            },
-
-            logo: {
-              color: "#fff",
-              fontSize: 24,
-              fontWeight: "bold"
-            },
-
-            sub: {
-              color: "#dcecff",
-              marginTop: 4,
-              fontSize: 13
-            },
-
-            box: {
-              backgroundColor: "#fff",
-              margin: 12,
-              padding: 15,
-              borderRadius: 10,
-              elevation: 2
-            },
-
-            title: {
-              fontSize: 18,
-              fontWeight: "bold",
-              marginBottom: 12
-            },
-
-            input: {
-              borderWidth: 1,
-              borderColor: "#ccc",
-              borderRadius: 8,
-              padding: 11,
-              marginBottom: 10,
-              backgroundColor: "#fff"
-            },
-
-            blue: {
-              backgroundColor: "#0759a8",
-              padding: 14,
-              borderRadius: 8,
-              alignItems: "center"
-            },
-
-            purple: {
-              backgroundColor: "#7b1fa2",
-              padding: 14,
-              borderRadius: 8,
-              alignItems: "center"
-            },
-
-            white: {
-              color: "#fff",
-              fontWeight: "bold"
-            },
-
-            close: {
-              backgroundColor: "#fce4ec",
-              padding: 13,
-              borderRadius: 8,
-              alignItems: "center"
-            },
-
-            closeText: {
-              color: "#c2185b",
-              fontWeight: "bold"
-            },
-
-            list: {
-              fontSize: 19,
-              fontWeight: "bold",
-              margin: 14
-            },
-
-            card: {
-              backgroundColor: "#fff",
-              marginHorizontal: 12,
-              marginBottom: 10,
-              padding: 15,
-              borderRadius: 10,
-              elevation: 2
-            },
-
-            row: {
-              flexDirection: "row",
-              justifyContent: "space-between"
-            },
-
-            name: {
-              fontSize: 18,
-              fontWeight: "bold"
-            },
-
-            invoice: {
-              color: "#666",
-              marginTop: 4
-            },
-
-            green: {
-              color: "#16835c",
-              fontSize: 16,
-              fontWeight: "bold",
-              marginTop: 7
-            },
-
-            red: {
-              color: "#c62828",
-              fontSize: 16,
-              fontWeight: "bold",
-              marginTop: 4
-            },
-
-            delete: {
-              color: "#c62828",
-              fontWeight: "bold"
-            },
-
-            secret: {
-              marginTop: 10,
-              padding: 10,
-              backgroundColor: "#f3e5f5",
-              borderRadius: 8
-            },
-
-            purpleText: {
-              color: "#7b1fa2",
-              fontSize: 16,
-              fontWeight: "bold"
-            },
-
-            total: {
-              color: "#b71c1c",
-              fontSize: 18,
-              fontWeight: "bold",
-              marginTop: 5
-            },
-
-            empty: {
-              textAlign: "center",
-              color: "#888"
-            }
-
-          });
-          APPJS
-
-          npx expo prebuild --platform android --no-install
-
-      - name: Verify API 36
+          PKG_PATH=$(find . -name "package.json" -not -path "*/node_modules/*" | head -n 1)
+          if [ -n "$PKG_PATH" ]; then
+            PROJECT_DIR=$(dirname "$PKG_PATH")
+          else
+            GRADLE_PATH=$(find . -name "build.gradle" -not -path "*/build/*" | head -n 1)
+            if [ -n "$GRADLE_PATH" ]; then
+              PROJECT_DIR=$(dirname $(dirname "$GRADLE_PATH"))
+            else
+              PROJECT_DIR="."
+            fi
+          fi
+          echo "Project directory: $PROJECT_DIR"
+          echo "project_dir=$PROJECT_DIR" >> $GITHUB_OUTPUT
+
+      - name: Install Dependencies
+        working-directory: ${{ steps.set-path.outputs.project_dir }}
         run: |
-          cd vyapar-khata
+          if [ -f "package.json" ]; then
+            npm install --legacy-peer-deps
+          fi
 
-          echo "Checking Android build files..."
+      - name: Auto-Patch Expo Modules Core for API 36
+        working-directory: ${{ steps.set-path.outputs.project_dir }}
+        run: |
+          FILE=$(find . -path "*/expo/modules/adapters/react/ModuleRegistryAdapter.kt" 2>/dev/null | head -n 1)
+          if [ -n "$FILE" ] && [ -f "$FILE" ]; then
+            echo "Patching $FILE..."
+            sed -i 's/\.filterIsInstance/?.filterIsInstance/g' "$FILE"
+            sed -i 's/\.map {/?.map {/g' "$FILE"
+          fi
+          find . -name "gradle.properties" -not -path "*/build/*" -exec sh -c 'echo "android.suppressUnsupportedCompileSdk=36" >> "$1"' _ {} \;
 
-          test -f android/app/build.gradle
-
-          grep -R "targetSdk" android/app android/build.gradle || true
-          grep -R "compileSdk" android/app android/build.gradle || true
-
-          echo "API 36 configuration check completed."
-
-      - name: Restore Permanent Signing Key
+      - name: Configure Keystore and Signing
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          test -n "$KEYSTORE_BASE64"
+          APP_GRADLE=$(find . -name "build.gradle" | grep -E "(app/build.gradle|android/app/build.gradle)" | head -n 1)
+          if [ -z "$APP_GRADLE" ]; then
+            APP_GRADLE=$(grep -l "com.android.application" $(find . -name "build.gradle") | head -n 1)
+          fi
 
-          echo "$KEYSTORE_BASE64" | base64 --decode \
-            > vyapar-khata/android/app/upload-keystore.jks
+          if [ -z "$APP_GRADLE" ]; then
+            echo "Could not find app build.gradle!"
+            exit 1
+          fi
 
-          test -s vyapar-khata/android/app/upload-keystore.jks
+          TARGET_DIR=$(dirname "$APP_GRADLE")
+          mkdir -p "$TARGET_DIR"
 
-      - name: Configure Release Signing
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          cd vyapar-khata/android
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$TARGET_DIR/upload-keystore.jks"
+            echo "Keystore successfully written to $TARGET_DIR/upload-keystore.jks"
+          fi
 
-          python3 - <<'PY'
-          from pathlib import Path
+          python3 - << EOF
+          import os
 
-          p = Path("app/build.gradle")
-          data = p.read_text()
+          gradle_path = "$APP_GRADLE"
+          with open(gradle_path, "r") as f:
+              data = f.read()
 
           release_block = """
-              release {
-                  storeFile file('upload-keystore.jks')
-                  storePassword System.getenv('KEYSTORE_PASSWORD')
-                  keyAlias System.getenv('KEY_ALIAS')
-                  keyPassword System.getenv('KEY_PASSWORD')
-              }
+                  release {
+                      storeFile file('upload-keystore.jks')
+                      storePassword System.getenv('KEYSTORE_PASSWORD')
+                      keyAlias System.getenv('KEY_ALIAS')
+                      keyPassword System.getenv('KEY_PASSWORD')
+                  }
           """
+          if "signingConfigs {" in data and "release {" not in data:
+              data = data.replace("signingConfigs {", "signingConfigs {" + release_block, 1)
+              data = data.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+              with open(gradle_path, "w") as f:
+                  f.write(data)
+              print("Injected release signing config into", gradle_path)
+          EOF
 
-          if "signingConfigs {" not in data:
-              raise SystemExit("signingConfigs block not found")
+      - name: Grant Execute Permission for Gradlew
+        run: |
+          GRADLEW_FILE=$(find . -name "gradlew" | head -n 1)
+          if [ -n "$GRADLEW_FILE" ]; then
+            chmod +x "$GRADLEW_FILE"
+          fi
 
-          data = data.replace(
-              "signingConfigs {",
-              "signingConfigs {" + release_block,
-              1
-          )
-
-          data = data.replace(
-              "signingConfig signingConfigs.debug",
-              "signingConfig signingConfigs.release"
-          )
-
-          p.write_text(data)
-          PY
-
-      - name: Build Release AAB
+      - name: Build Android App Bundle (AAB)
+        run: |
+          GRADLEW_PATH=$(find . -name "gradlew" | head -n 1)
+          if [ -z "$GRADLEW_PATH" ]; then
+            echo "gradlew not found!"
+            exit 1
+          fi
+          BUILD_DIR=$(dirname "$GRADLEW_PATH")
+          cd "$BUILD_DIR"
+          ./gradlew bundleRelease --no-daemon --stacktrace -Dorg.gradle.jvmargs="-Xmx3072m -XX:MaxMetaspaceSize=512m"
         env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          cd vyapar-khata/android
 
-          chmod +x gradlew
-
-          ./gradlew bundleRelease --no-daemon
-
-      - name: Upload AAB
+      - name: Upload AAB Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vyapar-khata-release-v54-api36
-          path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab
+          name: app-release.aab
+          path: |
+            **/build/outputs/bundle/release/*.aab

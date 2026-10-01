@@ -1,8 +1,6 @@
 name: Build Vyapar Khata AAB
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -10,128 +8,650 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Setup Java JDK
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
-          java-version: '17'
+          distribution: temurin
+          java-version: "17"
 
-      - name: Locate Project Root
-        id: set-path
+      - name: Create Expo App
         run: |
-          PKG_PATH=$(find . -name "package.json" -not -path "*/node_modules/*" | head -n 1)
-          if [ -n "$PKG_PATH" ]; then
-            PROJECT_DIR=$(dirname "$PKG_PATH")
-          else
-            GRADLE_PATH=$(find . -name "build.gradle" -not -path "*/build/*" | head -n 1)
-            if [ -n "$GRADLE_PATH" ]; then
-              PROJECT_DIR=$(dirname $(dirname "$GRADLE_PATH"))
-            else
-              PROJECT_DIR="."
-            fi
-          fi
-          echo "Project directory: $PROJECT_DIR"
-          echo "project_dir=$PROJECT_DIR" >> $GITHUB_OUTPUT
+          npx --yes create-expo-app@latest vyapar-khata --template blank@sdk-51 --no-install
+          cd vyapar-khata
+          npm install
+          npx expo install @react-native-async-storage/async-storage
 
-      - name: Install Dependencies
-        working-directory: ${{ steps.set-path.outputs.project_dir }}
+      - name: Configure App
         run: |
-          if [ -f "package.json" ]; then
-            npm install --legacy-peer-deps
-          fi
+          cd vyapar-khata
 
-      - name: Auto-Patch Expo Modules Core for API 36
-        working-directory: ${{ steps.set-path.outputs.project_dir }}
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file = "app.json";
+          const app = JSON.parse(fs.readFileSync(file, "utf8"));
+
+          app.expo.name = "Vyapar Khata";
+          app.expo.slug = "vyapar-khata";
+          app.expo.version = "1.0.54";
+
+          app.expo.android = {
+            ...(app.expo.android || {}),
+            package: "com.vyapar.khatabook.free",
+            versionCode: 54
+          };
+
+          fs.writeFileSync(file, JSON.stringify(app, null, 2));
+          NODE
+
+      - name: Create App.js
         run: |
-          FILE=$(find . -path "*/expo/modules/adapters/react/ModuleRegistryAdapter.kt" 2>/dev/null | head -n 1)
-          if [ -n "$FILE" ] && [ -f "$FILE" ]; then
-            echo "Patching $FILE..."
-            sed -i 's/\.filterIsInstance/?.filterIsInstance/g' "$FILE"
-            sed -i 's/\.map {/?.map {/g' "$FILE"
-          fi
-          find . -name "gradle.properties" -not -path "*/build/*" -exec sh -c 'echo "android.suppressUnsupportedCompileSdk=36" >> "$1"' _ {} \;
+          cd vyapar-khata
 
-      - name: Configure Keystore and Signing
+          cat > App.js <<'APPJS'
+          import React, { useEffect, useState } from "react";
+          import {
+            SafeAreaView,
+            View,
+            Text,
+            TextInput,
+            TouchableOpacity,
+            ScrollView,
+            StyleSheet,
+            Alert,
+            StatusBar
+          } from "react-native";
+
+          import AsyncStorage from "@react-native-async-storage/async-storage";
+
+          const DATA_KEY = "VYAPAR_KHATA_DATA";
+          const MASTER_PIN = "9999";
+
+          export default function App() {
+
+            const [records, setRecords] = useState([]);
+            const [name, setName] = useState("");
+            const [invoice, setInvoice] = useState("");
+            const [original, setOriginal] = useState("");
+            const [second, setSecond] = useState("");
+
+            const [masterOpen, setMasterOpen] = useState(false);
+            const [pin, setPin] = useState("");
+
+            useEffect(() => {
+              loadData();
+            }, []);
+
+            async function loadData() {
+              try {
+                const saved = await AsyncStorage.getItem(DATA_KEY);
+
+                if (saved) {
+                  setRecords(JSON.parse(saved));
+                }
+              } catch (e) {
+                console.log(e);
+              }
+            }
+
+            async function saveData(list) {
+              setRecords(list);
+              await AsyncStorage.setItem(
+                DATA_KEY,
+                JSON.stringify(list)
+              );
+            }
+
+            function addInvoice() {
+
+              if (
+                !name.trim() ||
+                !invoice.trim() ||
+                !original.trim()
+              ) {
+                Alert.alert(
+                  "Required",
+                  "Customer name, invoice number aur original amount bharein."
+                );
+                return;
+              }
+
+              const item = {
+                id: Date.now(),
+                name: name.trim(),
+                invoice: invoice.trim(),
+                original: Number(original),
+                second: masterOpen ? Number(second || 0) : 0
+              };
+
+              saveData([item, ...records]);
+
+              setName("");
+              setInvoice("");
+              setOriginal("");
+              setSecond("");
+
+              Alert.alert(
+                "Saved",
+                "Invoice successfully save ho gaya."
+              );
+            }
+
+            function openMaster() {
+
+              if (pin === MASTER_PIN) {
+                setMasterOpen(true);
+                setPin("");
+
+                Alert.alert(
+                  "Master Open",
+                  "Master ledger open ho gaya."
+                );
+              } else {
+                setPin("");
+
+                Alert.alert(
+                  "Access Denied",
+                  "Wrong Master PIN."
+                );
+              }
+            }
+
+            function deleteRecord(id) {
+
+              Alert.alert(
+                "Delete",
+                "Kya aap is invoice ko delete karna chahte hain?",
+                [
+                  {
+                    text: "Cancel",
+                    style: "cancel"
+                  },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: () => {
+                      const list = records.filter(
+                        item => item.id !== id
+                      );
+
+                      saveData(list);
+                    }
+                  }
+                ]
+              );
+            }
+
+            return (
+              <SafeAreaView style={styles.page}>
+
+                <StatusBar
+                  barStyle="light-content"
+                  backgroundColor="#0759A8"
+                />
+
+                <ScrollView
+                  keyboardShouldPersistTaps="handled"
+                >
+
+                  <View style={styles.header}>
+
+                    <Text style={styles.logo}>
+                      Vyapar Khata
+                    </Text>
+
+                    <Text style={styles.subtitle}>
+                      {masterOpen
+                        ? "MASTER CONSOLIDATED LEDGER"
+                        : "ORIGINAL INVOICE LEDGER"}
+                    </Text>
+
+                  </View>
+
+                  {!masterOpen ? (
+
+                    <View style={styles.box}>
+
+                      <Text style={styles.title}>
+                        🔐 Master Access
+                      </Text>
+
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Master PIN"
+                        keyboardType="numeric"
+                        secureTextEntry
+                        value={pin}
+                        onChangeText={setPin}
+                      />
+
+                      <TouchableOpacity
+                        style={styles.masterButton}
+                        onPress={openMaster}
+                      >
+                        <Text style={styles.buttonText}>
+                          OPEN MASTER
+                        </Text>
+                      </TouchableOpacity>
+
+                    </View>
+
+                  ) : (
+
+                    <View style={styles.box}>
+
+                      <TouchableOpacity
+                        style={styles.closeButton}
+                        onPress={() => setMasterOpen(false)}
+                      >
+                        <Text style={styles.closeText}>
+                          🔒 CLOSE MASTER
+                        </Text>
+                      </TouchableOpacity>
+
+                    </View>
+
+                  )}
+
+                  <View style={styles.box}>
+
+                    <Text style={styles.title}>
+                      New Invoice
+                    </Text>
+
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Customer Name"
+                      value={name}
+                      onChangeText={setName}
+                    />
+
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Invoice Number"
+                      value={invoice}
+                      onChangeText={setInvoice}
+                    />
+
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Original Invoice Amount"
+                      keyboardType="numeric"
+                      value={original}
+                      onChangeText={setOriginal}
+                    />
+
+                    {masterOpen && (
+
+                      <TextInput
+                        style={styles.secretInput}
+                        placeholder="Second Amount"
+                        keyboardType="numeric"
+                        value={second}
+                        onChangeText={setSecond}
+                      />
+
+                    )}
+
+                    <TouchableOpacity
+                      style={styles.saveButton}
+                      onPress={addInvoice}
+                    >
+                      <Text style={styles.buttonText}>
+                        SAVE INVOICE
+                      </Text>
+                    </TouchableOpacity>
+
+                  </View>
+
+                  <Text style={styles.listTitle}>
+                    Invoice Records ({records.length})
+                  </Text>
+
+                  {records.length === 0 ? (
+
+                    <View style={styles.box}>
+                      <Text style={styles.empty}>
+                        Abhi koi invoice nahi hai.
+                      </Text>
+                    </View>
+
+                  ) : (
+
+                    records.map(item => {
+
+                      const originalAmount =
+                        Number(item.original || 0);
+
+                      const secondAmount =
+                        Number(item.second || 0);
+
+                      const totalDue =
+                        originalAmount + secondAmount;
+
+                      return (
+
+                        <View
+                          key={item.id}
+                          style={styles.card}
+                        >
+
+                          <View style={styles.row}>
+
+                            <Text style={styles.customer}>
+                              {item.name}
+                            </Text>
+
+                            <TouchableOpacity
+                              onPress={() =>
+                                deleteRecord(item.id)
+                              }
+                            >
+                              <Text style={styles.delete}>
+                                DELETE
+                              </Text>
+                            </TouchableOpacity>
+
+                          </View>
+
+                          <Text style={styles.invoice}>
+                            Invoice: {item.invoice}
+                          </Text>
+
+                          <Text style={styles.original}>
+                            Original Invoice:
+                            {" ₹"}
+                            {originalAmount.toLocaleString("en-IN")}
+                          </Text>
+
+                          {!masterOpen ? (
+
+                            <Text style={styles.due}>
+                              Amount Due:
+                              {" ₹"}
+                              {originalAmount.toLocaleString("en-IN")}
+                            </Text>
+
+                          ) : (
+
+                            <View style={styles.masterBox}>
+
+                              <Text style={styles.second}>
+                                Second Amount:
+                                {" ₹"}
+                                {secondAmount.toLocaleString("en-IN")}
+                              </Text>
+
+                              <Text style={styles.total}>
+                                TOTAL DUE:
+                                {" ₹"}
+                                {totalDue.toLocaleString("en-IN")}
+                              </Text>
+
+                            </View>
+
+                          )}
+
+                        </View>
+
+                      );
+
+                    })
+
+                  )}
+
+                  <View style={{ height: 60 }} />
+
+                </ScrollView>
+
+              </SafeAreaView>
+            );
+          }
+
+          const styles = StyleSheet.create({
+
+            page: {
+              flex: 1,
+              backgroundColor: "#F3F6FA"
+            },
+
+            header: {
+              backgroundColor: "#0759A8",
+              padding: 20
+            },
+
+            logo: {
+              color: "#FFFFFF",
+              fontSize: 25,
+              fontWeight: "bold"
+            },
+
+            subtitle: {
+              color: "#DCEBFF",
+              marginTop: 5,
+              fontSize: 13
+            },
+
+            box: {
+              backgroundColor: "#FFFFFF",
+              margin: 12,
+              padding: 15,
+              borderRadius: 10,
+              elevation: 2
+            },
+
+            title: {
+              fontSize: 18,
+              fontWeight: "bold",
+              marginBottom: 12,
+              color: "#222222"
+            },
+
+            input: {
+              borderWidth: 1,
+              borderColor: "#CCCCCC",
+              borderRadius: 8,
+              padding: 12,
+              marginBottom: 10,
+              fontSize: 15,
+              backgroundColor: "#FFFFFF"
+            },
+
+            secretInput: {
+              borderWidth: 1,
+              borderColor: "#7B1FA2",
+              borderRadius: 8,
+              padding: 12,
+              marginBottom: 10,
+              fontSize: 15,
+              backgroundColor: "#FDF7FF"
+            },
+
+            saveButton: {
+              backgroundColor: "#0759A8",
+              padding: 14,
+              borderRadius: 8,
+              alignItems: "center"
+            },
+
+            masterButton: {
+              backgroundColor: "#7B1FA2",
+              padding: 14,
+              borderRadius: 8,
+              alignItems: "center"
+            },
+
+            buttonText: {
+              color: "#FFFFFF",
+              fontWeight: "bold",
+              fontSize: 15
+            },
+
+            closeButton: {
+              backgroundColor: "#FCE4EC",
+              padding: 13,
+              borderRadius: 8,
+              alignItems: "center"
+            },
+
+            closeText: {
+              color: "#C2185B",
+              fontWeight: "bold"
+            },
+
+            listTitle: {
+              fontSize: 19,
+              fontWeight: "bold",
+              marginHorizontal: 14,
+              marginTop: 8,
+              marginBottom: 8,
+              color: "#222222"
+            },
+
+            empty: {
+              textAlign: "center",
+              color: "#888888"
+            },
+
+            card: {
+              backgroundColor: "#FFFFFF",
+              marginHorizontal: 12,
+              marginBottom: 10,
+              padding: 15,
+              borderRadius: 10,
+              elevation: 2
+            },
+
+            row: {
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "center"
+            },
+
+            customer: {
+              fontSize: 17,
+              fontWeight: "bold",
+              color: "#111111"
+            },
+
+            delete: {
+              color: "#C62828",
+              fontWeight: "bold"
+            },
+
+            invoice: {
+              color: "#666666",
+              marginTop: 4
+            },
+
+            original: {
+              color: "#16835C",
+              fontSize: 16,
+              fontWeight: "bold",
+              marginTop: 8
+            },
+
+            due: {
+              color: "#C62828",
+              fontSize: 16,
+              fontWeight: "bold",
+              marginTop: 5
+            },
+
+            masterBox: {
+              marginTop: 10,
+              padding: 10,
+              backgroundColor: "#F3E5F5",
+              borderRadius: 8
+            },
+
+            second: {
+              color: "#7B1FA2",
+              fontSize: 15,
+              fontWeight: "bold"
+            },
+
+            total: {
+              color: "#B71C1C",
+              fontSize: 18,
+              fontWeight: "bold",
+              marginTop: 5
+            }
+
+          });
+          APPJS
+
+      - name: Create Android Project
+        run: |
+          cd vyapar-khata
+          npx expo prebuild --platform android --no-install
+
+      - name: Verify Android Project
+        run: |
+          test -f vyapar-khata/android/app/build.gradle
+          echo "Android app build.gradle found successfully."
+
+      - name: Setup Signing and Memory Optimizations
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          APP_GRADLE=$(find . -name "build.gradle" | grep -E "(app/build.gradle|android/app/build.gradle)" | head -n 1)
-          if [ -z "$APP_GRADLE" ]; then
-            APP_GRADLE=$(grep -l "com.android.application" $(find . -name "build.gradle") | head -n 1)
-          fi
+          cd vyapar-khata
 
-          if [ -z "$APP_GRADLE" ]; then
-            echo "Could not find app build.gradle!"
-            exit 1
-          fi
-
-          TARGET_DIR=$(dirname "$APP_GRADLE")
-          mkdir -p "$TARGET_DIR"
-
+          # Decode Keystore if available
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 --decode > "$TARGET_DIR/upload-keystore.jks"
-            echo "Keystore successfully written to $TARGET_DIR/upload-keystore.jks"
+            echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+            echo "Keystore written to android/app/upload-keystore.jks"
           fi
 
-          python3 - << EOF
+          # Add memory limits to gradle.properties
+          echo "org.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=512m" >> android/gradle.properties
+          echo "org.gradle.parallel=false" >> android/gradle.properties
+          echo "org.gradle.daemon=false" >> android/gradle.properties
+
+          # Inject Release Signing into android/app/build.gradle
+          python3 - << 'EOF'
           import os
 
-          gradle_path = "$APP_GRADLE"
-          with open(gradle_path, "r") as f:
-              data = f.read()
+          gradle_path = "android/app/build.gradle"
+          if os.path.exists(gradle_path):
+              with open(gradle_path, "r") as f:
+                  data = f.read()
 
-          release_block = """
-                  release {
-                      storeFile file('upload-keystore.jks')
-                      storePassword System.getenv('KEYSTORE_PASSWORD')
-                      keyAlias System.getenv('KEY_ALIAS')
-                      keyPassword System.getenv('KEY_PASSWORD')
-                  }
-          """
-          if "signingConfigs {" in data and "release {" not in data:
-              data = data.replace("signingConfigs {", "signingConfigs {" + release_block, 1)
-              data = data.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
-              with open(gradle_path, "w") as f:
-                  f.write(data)
-              print("Injected release signing config into", gradle_path)
+              release_block = """
+                      release {
+                          storeFile file('upload-keystore.jks')
+                          storePassword System.getenv('KEYSTORE_PASSWORD')
+                          keyAlias System.getenv('KEY_ALIAS')
+                          keyPassword System.getenv('KEY_PASSWORD')
+                      }
+              """
+              if "signingConfigs {" in data and "release {" not in data:
+                  data = data.replace("signingConfigs {", "signingConfigs {" + release_block, 1)
+                  data = data.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+                  with open(gradle_path, "w") as f:
+                      f.write(data)
+                  print("Signing config successfully added to app/build.gradle")
           EOF
 
       - name: Grant Execute Permission for Gradlew
-        run: |
-          GRADLEW_FILE=$(find . -name "gradlew" | head -n 1)
-          if [ -n "$GRADLEW_FILE" ]; then
-            chmod +x "$GRADLEW_FILE"
-          fi
+        run: chmod +x vyapar-khata/android/gradlew
 
       - name: Build Android App Bundle (AAB)
-        run: |
-          GRADLEW_PATH=$(find . -name "gradlew" | head -n 1)
-          if [ -z "$GRADLEW_PATH" ]; then
-            echo "gradlew not found!"
-            exit 1
-          fi
-          BUILD_DIR=$(dirname "$GRADLEW_PATH")
-          cd "$BUILD_DIR"
-          ./gradlew bundleRelease --no-daemon --stacktrace -Dorg.gradle.jvmargs="-Xmx3072m -XX:MaxMetaspaceSize=512m"
+        working-directory: vyapar-khata/android
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew bundleRelease --no-daemon
 
       - name: Upload AAB Artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release.aab
-          path: |
-            **/build/outputs/bundle/release/*.aab
+          path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab

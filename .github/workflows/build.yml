@@ -45,263 +45,224 @@ jobs:
           const app = JSON.parse(fs.readFileSync("app.json", "utf8"));
           app.expo.name = "Vyapar Khata";
           app.expo.slug = "vyapar-khata";
-          app.expo.version = "1.0.53";
+          app.expo.version = "1.0.55";
           app.expo.android = {
             package: "com.vyapar.khatabook.free",
-            versionCode: 53
+            versionCode: 55
           };
           fs.writeFileSync("app.json", JSON.stringify(app, null, 2));
           NODE
 
           cat > App.js <<'APPJS'
-          import React, { useState, useEffect } from "react";
-          import {
-            View,
-            Text,
-            TextInput,
-            TouchableOpacity,
-            ScrollView,
-            StyleSheet,
-            Alert,
-            SafeAreaView,
-            StatusBar
-          } from "react-native";
+          import React,{useState,useEffect} from "react";
+          import {View,Text,TextInput,TouchableOpacity,ScrollView,StyleSheet,Alert} from "react-native";
           import AsyncStorage from "@react-native-async-storage/async-storage";
 
-          const KEY = "DUAL_LEDGER_DATA";
-          const MASTER = "9999";
+          const KEY="DUAL_LEDGER_DATA";
+          const MASTER="9999";
 
-          export default function App() {
-            const [data, setData] = useState([]);
-            const [name, setName] = useState("");
-            const [invoice, setInvoice] = useState("");
-            const [original, setOriginal] = useState("");
-            const [second, setSecond] = useState("");
-            const [master, setMaster] = useState(false);
-            const [mpin, setMpin] = useState("");
+          export default function App(){
+            const [data,setData]=useState([]);
+            const [name,setName]=useState("");
+            const [invoice,setInvoice]=useState("");
+            const [original,setOriginal]=useState("");
+            const [second,setSecond]=useState("");
+            const [master,setMaster]=useState(false);
+            const [mpin,setMpin]=useState("");
 
-            useEffect(() => {
-              load();
-            }, []);
+            useEffect(()=>{load()},[]);
 
-            async function load() {
-              try {
-                const x = await AsyncStorage.getItem(KEY);
-                if (x) setData(JSON.parse(x));
-              } catch (e) {
-                console.log(e);
-              }
+            async function load(){
+              const x=await AsyncStorage.getItem(KEY);
+              if(x)setData(JSON.parse(x));
             }
 
-            async function save(list) {
+            async function save(list){
               setData(list);
-              await AsyncStorage.setItem(KEY, JSON.stringify(list));
+              await AsyncStorage.setItem(KEY,JSON.stringify(list));
             }
 
-            function add() {
-              if (!name.trim() || !invoice.trim() || !original.trim()) {
-                Alert.alert("Required", "Customer Name, Invoice aur Original Amount bharein");
+            function add(){
+              if(!name||!invoice||!original){
+                Alert.alert("Required","Name, Invoice aur Original Amount bharein");
                 return;
               }
 
-              const item = {
-                id: Date.now(),
-                name: name.trim(),
-                invoice: invoice.trim(),
-                original: Number(original),
-                second: Number(second || 0)
+              const item={
+                id:Date.now(),
+                name:name,
+                invoice:invoice,
+                original:Number(original),
+                second:Number(second||0)
               };
 
-              save([item, ...data]);
+              save([item,...data]);
               setName("");
               setInvoice("");
               setOriginal("");
               setSecond("");
-              Alert.alert("Success", "Record add ho gaya");
             }
 
-            function deleteItem(id) {
-              Alert.alert("Delete", "Kya aap is entry ko delete karna chahte hain?", [
-                { text: "Cancel", style: "cancel" },
-                {
-                  text: "Delete",
-                  style: "destructive",
-                  onPress: () => {
-                    const filtered = data.filter((x) => x.id !== id);
-                    save(filtered);
-                  }
-                }
-              ]);
-            }
-
-            function openMaster() {
-              if (mpin === MASTER) {
+            function openMaster(){
+              if(mpin===MASTER){
                 setMaster(true);
                 setMpin("");
-                Alert.alert("Unlocked", "Master Ledger active ho gaya.");
-              } else {
-                Alert.alert("Access Denied", "Wrong Master PIN");
-                setMpin("");
+              }else{
+                Alert.alert("Access Denied","Wrong Master PIN");
               }
             }
 
-            return (
-              <SafeAreaView style={s.page}>
-                <StatusBar barStyle="light-content" backgroundColor="#0759a8" />
-                <ScrollView keyboardShouldPersistTaps="handled">
-                  <View style={s.head}>
-                    <Text style={s.logo}>Vyapar Khata</Text>
-                    <Text style={s.sub}>
-                      {master ? "★ MASTER CONSOLIDATED VIEW" : "OFFICIAL REGULAR VIEW"}
-                    </Text>
-                  </View>
+            return(
+              <ScrollView style={s.page}>
+                <View style={s.head}>
+                  <Text style={s.logo}>Vyapar Khata</Text>
+                  <Text style={s.sub}>
+                    {master?"MASTER LEDGER":"ORIGINAL LEDGER"}
+                  </Text>
+                </View>
 
-                  {!master ? (
-                    <View style={s.box}>
-                      <Text style={s.title}>🔐 Master Access</Text>
-                      <TextInput
-                        style={s.input}
-                        placeholder="Master PIN dalein"
-                        keyboardType="numeric"
-                        secureTextEntry
-                        value={mpin}
-                        onChangeText={setMpin}
-                      />
-                      <TouchableOpacity style={s.purple} onPress={openMaster}>
-                        <Text style={s.white}>OPEN MASTER</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <View style={s.box}>
-                      <TouchableOpacity
-                        style={s.closeBtn}
-                        onPress={() => setMaster(false)}
-                      >
-                        <Text style={s.closeBtnText}>🔒 Close Master Mode</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-
+                {!master&&(
                   <View style={s.box}>
-                    <Text style={s.title}>New Invoice Entry</Text>
-
+                    <Text style={s.title}>🔐 Master Access</Text>
                     <TextInput
                       style={s.input}
-                      placeholder="Customer Name *"
-                      value={name}
-                      onChangeText={setName}
-                    />
-
-                    <TextInput
-                      style={s.input}
-                      placeholder="Invoice Number *"
-                      value={invoice}
-                      onChangeText={setInvoice}
-                    />
-
-                    <TextInput
-                      style={s.input}
-                      placeholder="Original Invoice Amount (₹) *"
+                      placeholder="Master PIN"
                       keyboardType="numeric"
-                      value={original}
-                      onChangeText={setOriginal}
+                      secureTextEntry
+                      value={mpin}
+                      onChangeText={setMpin}
                     />
-
-                    {master ? (
-                      <TextInput
-                        style={[s.input, { borderColor: "#7b1fa2", backgroundColor: "#fdf7ff" }]}
-                        placeholder="Second Secret Amount (₹)"
-                        keyboardType="numeric"
-                        value={second}
-                        onChangeText={setSecond}
-                      />
-                    ) : null}
-
-                    <TouchableOpacity style={s.blue} onPress={add}>
-                      <Text style={s.white}>SAVE INVOICE</Text>
+                    <TouchableOpacity style={s.purple} onPress={openMaster}>
+                      <Text style={s.white}>OPEN MASTER</Text>
                     </TouchableOpacity>
                   </View>
+                )}
 
-                  <Text style={s.list}>
-                    Invoice Records ({data.length})
-                  </Text>
+                {master&&(
+                  <TouchableOpacity
+                    style={s.close}
+                    onPress={()=>setMaster(false)}
+                  >
+                    <Text>🔒 Close Master Mode</Text>
+                  </TouchableOpacity>
+                )}
 
-                  {data.length === 0 ? (
-                    <View style={s.box}>
-                      <Text style={{ textAlign: "center", color: "#888" }}>
-                        Abhi koi invoice nahi hai.
+                <View style={s.box}>
+                  <Text style={s.title}>New Original Invoice</Text>
+
+                  <TextInput
+                    style={s.input}
+                    placeholder="Customer Name"
+                    value={name}
+                    onChangeText={setName}
+                  />
+
+                  <TextInput
+                    style={s.input}
+                    placeholder="Invoice Number"
+                    value={invoice}
+                    onChangeText={setInvoice}
+                  />
+
+                  <TextInput
+                    style={s.input}
+                    placeholder="Original Invoice Amount"
+                    keyboardType="numeric"
+                    value={original}
+                    onChangeText={setOriginal}
+                  />
+
+                  <TextInput
+                    style={s.input}
+                    placeholder="Second Amount (Master Only)"
+                    keyboardType="numeric"
+                    value={second}
+                    onChangeText={setSecond}
+                  />
+
+                  <TouchableOpacity style={s.blue} onPress={add}>
+                    <Text style={s.white}>SAVE INVOICE</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={s.list}>Invoice Records</Text>
+
+                {data.map(x=>{
+                  const total=x.original+x.second;
+
+                  return(
+                    <View style={s.card} key={x.id}>
+                      <Text style={s.name}>{x.name}</Text>
+                      <Text>Invoice: {x.invoice}</Text>
+
+                      <Text style={s.green}>
+                        Original: ₹{x.original}
                       </Text>
-                    </View>
-                  ) : (
-                    data.map((x) => {
-                      const total = Number(x.original || 0) + Number(x.second || 0);
 
-                      return (
-                        <View style={s.card} key={x.id}>
-                          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                            <Text style={s.name}>{x.name}</Text>
-                            <TouchableOpacity onPress={() => deleteItem(x.id)}>
-                              <Text style={{ color: "#c62828", fontWeight: "bold" }}>Del ✖</Text>
-                            </TouchableOpacity>
-                          </View>
+                      {!master&&(
+                        <Text style={s.red}>
+                          Original Due: ₹{x.original}
+                        </Text>
+                      )}
 
-                          <Text style={s.invNo}>Invoice: {x.invoice}</Text>
-
-                          <Text style={s.green}>
-                            Original: ₹{Number(x.original).toLocaleString("en-IN")}
+                      {master&&(
+                        <View style={s.secret}>
+                          <Text style={s.purpleText}>
+                            Second Amount: ₹{x.second}
                           </Text>
 
-                          {!master ? (
-                            <Text style={s.red}>
-                              Original Due: ₹{Number(x.original).toLocaleString("en-IN")}
-                            </Text>
-                          ) : (
-                            <View style={s.secret}>
-                              <Text style={s.purpleText}>
-                                Second Amount: ₹{Number(x.second || 0).toLocaleString("en-IN")}
-                              </Text>
-                              <Text style={s.totalDue}>
-                                TOTAL DUE: ₹{total.toLocaleString("en-IN")}
-                              </Text>
-                            </View>
-                          )}
+                          <Text style={s.red}>
+                            TOTAL DUE: ₹{total}
+                          </Text>
                         </View>
-                      );
-                    })
-                  )}
+                      )}
+                    </View>
+                  );
+                })}
 
-                  <View style={{ height: 60 }} />
-                </ScrollView>
-              </SafeAreaView>
+                <View style={{height:50}}/>
+              </ScrollView>
             );
           }
 
-          const s = StyleSheet.create({
-            page: { flex: 1, backgroundColor: "#f3f6fa" },
-            head: { backgroundColor: "#0759a8", padding: 20 },
-            logo: { color: "#fff", fontSize: 24, fontWeight: "bold" },
-            sub: { color: "#dcecff", marginTop: 4, fontSize: 13, fontWeight: "600" },
-            box: { backgroundColor: "#fff", marginHorizontal: 12, marginTop: 12, padding: 15, borderRadius: 10, elevation: 2 },
-            title: { fontSize: 17, fontWeight: "bold", marginBottom: 12, color: "#222" },
-            input: { borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 11, marginBottom: 10, fontSize: 15, backgroundColor: "#fff" },
-            blue: { backgroundColor: "#0759a8", padding: 14, borderRadius: 8, alignItems: "center", marginTop: 4 },
-            purple: { backgroundColor: "#7b1fa2", padding: 13, borderRadius: 8, alignItems: "center" },
-            white: { color: "#fff", fontWeight: "bold", fontSize: 15 },
-            closeBtn: { padding: 12, alignItems: "center", backgroundColor: "#fce4ec", borderRadius: 8 },
-            closeBtnText: { color: "#c2185b", fontWeight: "bold", fontSize: 14 },
-            list: { fontSize: 18, fontWeight: "bold", marginHorizontal: 14, marginTop: 16, marginBottom: 8, color: "#222" },
-            card: { backgroundColor: "#fff", marginHorizontal: 12, marginBottom: 10, padding: 15, borderRadius: 10, elevation: 2 },
-            name: { fontSize: 17, fontWeight: "bold", color: "#111" },
-            invNo: { color: "#666", fontSize: 13, marginTop: 2 },
-            green: { color: "#16835c", fontSize: 16, fontWeight: "bold", marginTop: 6 },
-            red: { color: "#c62828", fontSize: 16, fontWeight: "bold", marginTop: 4 },
-            secret: { marginTop: 10, padding: 10, backgroundColor: "#f3e5f5", borderRadius: 8, borderWidth: 1, borderColor: "#e1bee7" },
-            purpleText: { color: "#7b1fa2", fontSize: 15, fontWeight: "bold" },
-            totalDue: { color: "#b71c1c", fontSize: 17, fontWeight: "bold", marginTop: 4 }
+          const s=StyleSheet.create({
+            page:{flex:1,backgroundColor:"#f3f6fa"},
+            head:{backgroundColor:"#0759a8",padding:22},
+            logo:{color:"#fff",fontSize:25,fontWeight:"bold"},
+            sub:{color:"#dcecff",marginTop:4},
+            box:{backgroundColor:"#fff",margin:12,padding:15,borderRadius:10},
+            title:{fontSize:18,fontWeight:"bold",marginBottom:10},
+            input:{borderWidth:1,borderColor:"#ccc",borderRadius:7,padding:11,marginBottom:8},
+            blue:{backgroundColor:"#0759a8",padding:14,borderRadius:7,alignItems:"center"},
+            purple:{backgroundColor:"#7b1fa2",padding:14,borderRadius:7,alignItems:"center"},
+            white:{color:"#fff",fontWeight:"bold"},
+            close:{padding:14,alignItems:"center"},
+            list:{fontSize:20,fontWeight:"bold",margin:14},
+            card:{backgroundColor:"#fff",marginHorizontal:12,marginBottom:10,padding:15,borderRadius:10},
+            name:{fontSize:18,fontWeight:"bold"},
+            green:{color:"#16835c",fontSize:17,fontWeight:"bold",marginTop:6},
+            red:{color:"#c62828",fontSize:17,fontWeight:"bold",marginTop:6},
+            secret:{marginTop:10,padding:10,backgroundColor:"#f3e5f5",borderRadius:7},
+            purpleText:{color:"#7b1fa2",fontSize:17,fontWeight:"bold"}
           });
           APPJS
 
           npx expo prebuild --platform android --no-install
+
+      - name: Update Target and Compile SDK to API 36
+        run: |
+          cd vyapar-khata/android
+          echo "android.compileSdkVersion=36" >> gradle.properties
+          echo "android.targetSdkVersion=36" >> gradle.properties
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          p = Path("app/build.gradle")
+          content = p.read_text()
+          content = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 36', content)
+          content = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 36', content)
+          p.write_text(content)
+          PY
 
       - name: Restore Existing Permanent Signing Key
         env:
@@ -357,5 +318,5 @@ jobs:
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: vyapar-khata-release-v53
+          name: vyapar-khata-release-v55
           path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab

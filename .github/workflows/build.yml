@@ -15,15 +15,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Inspect Repository Structure
-        run: |
-          echo "=== CURRENT DIRECTORY ==="
-          pwd
-          echo "=== DIRECTORY LISTING ==="
-          ls -la
-          echo "=== FINDING ALL FILES ==="
-          find . -maxdepth 4 -not -path '*/.*'
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -39,18 +30,17 @@ jobs:
         id: set-path
         run: |
           PKG_PATH=$(find . -name "package.json" -not -path "*/node_modules/*" | head -n 1)
-          if [ -z "$PKG_PATH" ]; then
-            echo "Searching for gradle files instead..."
+          if [ -n "$PKG_PATH" ]; then
+            PROJECT_DIR=$(dirname "$PKG_PATH")
+          else
             GRADLE_PATH=$(find . -name "build.gradle" -not -path "*/build/*" | head -n 1)
             if [ -n "$GRADLE_PATH" ]; then
               PROJECT_DIR=$(dirname $(dirname "$GRADLE_PATH"))
             else
               PROJECT_DIR="."
             fi
-          else
-            PROJECT_DIR=$(dirname "$PKG_PATH")
           fi
-          echo "Project directory determined as: $PROJECT_DIR"
+          echo "Project directory: $PROJECT_DIR"
           echo "project_dir=$PROJECT_DIR" >> $GITHUB_OUTPUT
 
       - name: Install Dependencies
@@ -58,8 +48,6 @@ jobs:
         run: |
           if [ -f "package.json" ]; then
             npm install
-          else
-            echo "No package.json found in $PWD, skipping npm install..."
           fi
 
       - name: Auto-Patch Expo Modules Core for API 36
@@ -71,48 +59,52 @@ jobs:
             sed -i 's/\.filterIsInstance/?.filterIsInstance/g' "$FILE"
             sed -i 's/\.map {/?.map {/g' "$FILE"
           fi
-          if [ -d "android" ]; then
-            echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
-          elif [ -f "gradle.properties" ]; then
-            echo "android.suppressUnsupportedCompileSdk=36" >> gradle.properties
-          fi
+          find . -name "gradle.properties" -not -path "*/build/*" -exec sh -c 'echo "android.suppressUnsupportedCompileSdk=36" >> "$1"' _ {} \;
 
       - name: Configure Keystore and Signing
-        working-directory: ${{ steps.set-path.outputs.project_dir }}
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          APP_DIR="android/app"
-          if [ ! -d "$APP_DIR" ] && [ -d "app" ]; then
-            APP_DIR="app"
+          APP_GRADLE=$(find . -name "build.gradle" | grep -E "(app/build.gradle|android/app/build.gradle)" | head -n 1)
+          if [ -z "$APP_GRADLE" ]; then
+            echo "Searching for any application build.gradle..."
+            APP_GRADLE=$(grep -l "com.android.application" $(find . -name "build.gradle") | head -n 1)
           fi
 
+          if [ -z "$APP_GRADLE" ]; then
+            echo "Could not find app build.gradle!"
+            exit 1
+          fi
+
+          TARGET_DIR=$(dirname "$APP_GRADLE")
+          mkdir -p "$TARGET_DIR"
+
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 --decode > "$APP_DIR/upload-keystore.jks"
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$TARGET_DIR/upload-keystore.jks"
+            echo "Keystore successfully written to $TARGET_DIR/upload-keystore.jks"
           fi
 
           python3 - << EOF
           import os
 
-          gradle_file = "$APP_DIR/build.gradle"
-          if os.path.exists(gradle_file):
-              with open(gradle_file, "r") as f:
-                  data = f.read()
+          gradle_path = "$APP_GRADLE"
+          with open(gradle_path, "r") as f:
+              data = f.read()
 
-              release_block = """
-                      release {
-                          storeFile file('upload-keystore.jks')
-                          storePassword System.getenv('KEYSTORE_PASSWORD')
-                          keyAlias System.getenv('KEY_ALIAS')
-                          keyPassword System.getenv('KEY_PASSWORD')
-                      }
-              """
-              if "signingConfigs {" in data and "release {" not in data:
-                  data = data.replace("signingConfigs {", "signingConfigs {" + release_block, 1)
-                  data = data.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
-                  with open(gradle_file, "w") as f:
-                      f.write(data)
-                  print("Signing configuration injected successfully.")
+          release_block = """
+                  release {
+                      storeFile file('upload-keystore.jks')
+                      storePassword System.getenv('KEYSTORE_PASSWORD')
+                      keyAlias System.getenv('KEY_ALIAS')
+                      keyPassword System.getenv('KEY_PASSWORD')
+                  }
+          """
+          if "signingConfigs {" in data and "release {" not in data:
+              data = data.replace("signingConfigs {", "signingConfigs {" + release_block, 1)
+              data = data.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+              with open(gradle_path, "w") as f:
+                  f.write(data)
+              print("Injected release signing config into", gradle_path)
           EOF
 
       - name: Grant Execute Permission for Gradlew

@@ -3,6 +3,10 @@ name: Build Vyapar Khata AAB
 on:
   workflow_dispatch:
 
+defaults:
+  run:
+    working-directory: github
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -32,7 +36,7 @@ jobs:
           echo ""
 
           if [ ! -f package.json ]; then
-            echo "ERROR: package.json is not in repository root."
+            echo "ERROR: package.json is not in working directory."
             exit 1
           fi
 
@@ -45,7 +49,7 @@ jobs:
         run: npx expo prebuild --platform android --no-install
 
       - name: Set Android version
-        working-directory: android
+        working-directory: github/android
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -92,7 +96,7 @@ jobs:
           echo "Upload keystore restored successfully."
 
       - name: Configure release signing
-        working-directory: android
+        working-directory: github/android
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -134,7 +138,7 @@ jobs:
           PY
 
       - name: Build release AAB
-        working-directory: android
+        working-directory: github/android
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -164,6 +168,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vyapar-khata-aab
-          path: android/app/build/outputs/bundle/release/*.aab
+          path: github/android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
           retention-days: 7

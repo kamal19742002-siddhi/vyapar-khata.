@@ -1,12 +1,10 @@
 name: Build Vyapar Khata AAB
-
 on:
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,16 +24,12 @@ jobs:
         id: locate
         shell: bash
         run: |
-          PKG_PATH=$(find . -type f -name "package.json" \
-            -not -path "*/node_modules/*" | head -n 1)
-
+          PKG_PATH=$(find . -type f -name "package.json" -not -path "*/node_modules/*" | head -n 1)
           if [ -z "$PKG_PATH" ]; then
             echo "ERROR: package.json not found"
             exit 1
           fi
-
           PROJECT_DIR=$(dirname "$PKG_PATH")
-
           echo "Found package.json: $PKG_PATH"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
@@ -44,72 +38,45 @@ jobs:
         shell: bash
         run: |
           if [ -f package-lock.json ]; then
-            echo "package-lock.json found"
             npm ci
           else
-            echo "No package-lock.json found"
-            echo "Using npm install"
             npm install
           fi
 
-      - name: Expo prebuild
+      # Dynamic versioning & SDK update via Expo Config before prebuild
+      - name: Inject Version and Target SDK into app.json
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
-          npx expo prebuild --platform android --no-install
+          # Use GITHUB_RUN_NUMBER to guarantee a continuously rising, unique version code
+          # Example: If your last build was 1083, offset it by 1100 to get 1100 + run_number
+          VERSION_CODE=$((1100 + GITHUB_RUN_NUMBER))
+          echo "Setting Android Version Code to: $VERSION_CODE"
+          
+          node -e "
+            const fs = require('fs');
+            const file = 'app.json';
+            const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+            
+            if (!data.expo) data.expo = {};
+            if (!data.expo.android) data.expo.android = {};
+            
+            // Forces the version code to always increase
+            data.expo.android.versionCode = $VERSION_CODE;
+            
+            fs.writeFileSync(file, JSON.stringify(data, null, 2));
+          "
 
-      - name: Configure Android API 36
-        working-directory: ${{ env.PROJECT_DIR }}/android
+      - name: Expo prebuild
+        working-directory: ${{ env.PROJECT_DIR }}
+        env:
+          # Expo explicitly looks for these env variables to set SDK levels during prebuild
+          ANDROID_BUILD_TOOLS_VERSION: "36.0.0"
+          ANDROID_COMPILE_SDK_VERSION: "36"
+          ANDROID_TARGET_SDK_VERSION: "36"
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          path = Path("app/build.gradle")
-
-          if not path.exists():
-              raise SystemExit("ERROR: android/app/build.gradle not found")
-
-          text = path.read_text()
-
-          # compileSdk
-          text = re.sub(
-              r'compileSdk(?:Version)?\s*=?\s*\d+',
-              'compileSdk 36',
-              text
-          )
-
-          # targetSdk
-          text = re.sub(
-              r'targetSdk(?:Version)?\s*=?\s*\d+',
-              'targetSdk 36',
-              text
-          )
-
-          # versionCode
-          if re.search(r'versionCode\s*=?\s*\d+', text):
-              text = re.sub(
-                  r'versionCode\s*=?\s*\d+',
-                  'versionCode 2001',
-                  text
-              )
-          else:
-              text = text.replace(
-                  'defaultConfig {',
-                  'defaultConfig {\n        versionCode 2001',
-                  1
-              )
-
-          path.write_text(text)
-
-          print("compileSdk = 36")
-          print("targetSdk = 36")
-          print("versionCode = 2001")
-          PY
-
-          echo "=== Android configuration ==="
-          grep -nE "compileSdk|targetSdk|versionCode" app/build.gradle || true
+          npx expo prebuild --platform android --no-install
 
       - name: Restore upload keystore
         working-directory: ${{ env.PROJECT_DIR }}
@@ -121,17 +88,12 @@ jobs:
             echo "ERROR: KEYSTORE_BASE64 secret is missing"
             exit 1
           fi
-
           mkdir -p android/app
-
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode \
-            > android/app/upload-keystore.jks
-
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
           if [ ! -s android/app/upload-keystore.jks ]; then
             echo "ERROR: Keystore was not created"
             exit 1
           fi
-
           echo "Keystore restored successfully"
 
       - name: Configure release signing
@@ -144,14 +106,9 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           path = Path("app/build.gradle")
-
-          if not path.exists():
-              raise SystemExit("ERROR: app/build.gradle not found")
-
+          if not path.exists(): raise SystemExit("ERROR: app/build.gradle not found")
           text = path.read_text()
-
           if "upload-keystore.jks" not in text:
               signing_block = """
               signingConfigs {
@@ -163,31 +120,12 @@ jobs:
                   }
               }
               """
-
-              text = text.replace(
-                  "android {",
-                  "android {\n" + signing_block,
-                  1
-              )
-
-          text = text.replace(
-              "signingConfig signingConfigs.debug",
-              "signingConfig signingConfigs.release"
-          )
-
-          if "signingConfig signingConfigs.release" not in text:
-              text = text.replace(
-                  "buildTypes {",
-                  """buildTypes {
-                  release {
-                      signingConfig signingConfigs.release
-                  }""",
-                  1
-              )
-
-          path.write_text(text)
-
-          print("Release signing configured")
+              text = text.replace("android {", "android {\n" + signing_block, 1)
+              text = text.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+              if "signingConfig signingConfigs.release" not in text:
+                  text = text.replace("buildTypes {", "buildTypes {\n        release {\n            signingConfig signingConfigs.release\n        }", 1)
+              path.write_text(text)
+              print("Release signing configured")
           PY
 
       - name: Verify configuration
@@ -195,8 +133,7 @@ jobs:
         shell: bash
         run: |
           echo "=== Final Android configuration ==="
-          grep -nE "compileSdk|targetSdk|versionCode|signingConfig" \
-            app/build.gradle || true
+          grep -nE "compileSdk|targetSdk|versionCode|signingConfig" app/build.gradle || true
 
       - name: Build release AAB
         working-directory: ${{ env.PROJECT_DIR }}/android
@@ -207,21 +144,17 @@ jobs:
         shell: bash
         run: |
           chmod +x gradlew
-
           ./gradlew clean
-
           ./gradlew bundleRelease --no-daemon
 
       - name: Find AAB
         shell: bash
         run: |
           AAB=$(find . -type f -name "*.aab" | head -n 1)
-
           if [ -z "$AAB" ]; then
             echo "ERROR: AAB was not generated"
             exit 1
           fi
-
           echo "AAB FOUND: $AAB"
           echo "AAB_PATH=$AAB" >> "$GITHUB_ENV"
 

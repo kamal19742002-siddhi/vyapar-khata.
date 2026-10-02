@@ -6,7 +6,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -17,7 +16,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Create Expo App
         run: |
@@ -32,65 +31,66 @@ jobs:
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           node <<'NODE'
-          const fs = require("fs");
-          const app = JSON.parse(fs.readFileSync("app.json", "utf8"));
-          const runNumber = parseInt(process.env.RUN_NUMBER || "1", 10);
-
-          app.expo.name = "Vyapar Khata";
-          app.expo.slug = "vyapar-khata";
-          app.expo.version = `2.0.${runNumber}`;
-          app.expo.android = {
-            ...(app.expo.android || {}),
-            package: "com.vyapar.khatabook.free",
-            versionCode: 2000 + runNumber
-          };
-
-          fs.writeFileSync("app.json", JSON.stringify(app, null, 2));
-          console.log("Version code:", 2000 + runNumber);
+          const fs=require('fs');
+          const app=JSON.parse(fs.readFileSync('app.json','utf8'));
+          const n=parseInt(process.env.RUN_NUMBER||'1',10);
+          app.expo.name='Vyapar Khata';
+          app.expo.slug='vyapar-khata';
+          app.expo.version=`2.0.${n}`;
+          app.expo.android={...(app.expo.android||{}),package:'com.vyapar.khatabook.free',versionCode:2000+n};
+          fs.writeFileSync('app.json',JSON.stringify(app,null,2));
+          console.log('VERSION CODE =',2000+n);
           NODE
 
       - name: Create App.js
         working-directory: vyapar-khata
         run: |
           cat > App.js <<'APPJS'
-          import React, { useEffect, useState } from "react";
-          import {
-            SafeAreaView,
-            ScrollView,
-            View,
-            Text,
-            TextInput,
-            TouchableOpacity,
-            StyleSheet,
-            Alert,
-            StatusBar
-          } from "react-native";
-          import AsyncStorage from "@react-native-async-storage/async-storage";
+          import React,{useEffect,useState} from 'react';
+          import {SafeAreaView,ScrollView,View,Text,TextInput,TouchableOpacity,StyleSheet,Alert,StatusBar} from 'react-native';
+          import AsyncStorage from '@react-native-async-storage/async-storage';
+          const KEY='VYAPAR_KHATA_DATA', PIN='9999';
+          export default function App(){
+            const [records,setRecords]=useState([]),[name,setName]=useState(''),[invoice,setInvoice]=useState(''),[original,setOriginal]=useState(''),[second,setSecond]=useState(''),[master,setMaster]=useState(false),[pin,setPin]=useState('');
+            useEffect(()=>{load();},[]);
+            async function load(){try{const x=await AsyncStorage.getItem(KEY);if(x)setRecords(JSON.parse(x));}catch(e){console.log(e)}}
+            async function save(list){try{setRecords(list);await AsyncStorage.setItem(KEY,JSON.stringify(list));}catch(e){Alert.alert('Storage Error','Data save nahi ho paya.')}}
+            function unlock(){if(pin===PIN){setMaster(true);setPin('')}else{Alert.alert('Access Denied','Wrong Master PIN');setPin('')}}
+            function add(){if(!name.trim()||!invoice.trim()||!original.trim()){Alert.alert('Required','Customer, Invoice aur Amount bharein.');return}const a=Number(original),b=master&&second.trim()?Number(second):0;if(!Number.isFinite(a)||a<0||!Number.isFinite(b)||b<0){Alert.alert('Invalid Amount','Valid amount enter karein.');return}save([{id:Date.now(),name:name.trim(),invoice:invoice.trim(),original:a,second:master?b:0},...records]);setName('');setInvoice('');setOriginal('');setSecond('')}
+            function del(id){Alert.alert('Delete','Invoice delete karein?',[{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:()=>save(records.filter(x=>x.id!==id))}])}
+            const money=n=>Number(n||0).toLocaleString('en-IN'),total=records.reduce((s,x)=>s+Number(x.original||0),0),extra=records.reduce((s,x)=>s+Number(x.second||0),0);
+            return <SafeAreaView style={s.page}><StatusBar barStyle="light-content" backgroundColor="#0759A8"/><ScrollView keyboardShouldPersistTaps="handled"><View style={s.header}><Text style={s.logo}>Vyapar Khata</Text><Text style={s.sub}>{master?'MASTER MODE':'REGULAR MODE'}</Text></View>{!master?<View style={s.box}><Text style={s.title}>Master Access</Text><TextInput style={s.input} placeholder="Master PIN" keyboardType="numeric" secureTextEntry value={pin} onChangeText={setPin}/><TouchableOpacity style={s.purple} onPress={unlock}><Text style={s.bt}>OPEN MASTER</Text></TouchableOpacity></View>:<View style={s.box}><TouchableOpacity style={s.close} onPress={()=>setMaster(false)}><Text style={s.closeText}>CLOSE MASTER MODE</Text></TouchableOpacity></View>}<View style={s.stats}><View style={s.stat}><Text style={s.label}>INVOICES</Text><Text style={s.value}>{records.length}</Text></View><View style={s.stat}><Text style={s.label}>ORIGINAL</Text><Text style={s.value}>₹ {money(total)}</Text></View>{master&&<View style={s.stat}><Text style={s.label}>TOTAL DUE</Text><Text style={s.value}>₹ {money(total+extra)}</Text></View>}</View><View style={s.box}><Text style={s.title}>New Invoice</Text><TextInput style={s.input} placeholder="Customer Name" value={name} onChangeText={setName}/><TextInput style={s.input} placeholder="Invoice Number" value={invoice} onChangeText={setInvoice}/><TextInput style={s.input} placeholder="Original Invoice Amount" keyboardType="numeric" value={original} onChangeText={setOriginal}/>{master&&<TextInput style={s.secret} placeholder="Second Amount" keyboardType="numeric" value={second} onChangeText={setSecond}/>}<TouchableOpacity style={s.blue} onPress={add}><Text style={s.bt}>SAVE INVOICE</Text></TouchableOpacity></View><Text style={s.list}>Invoice Records ({records.length})</Text>{records.length===0?<View style={s.box}><Text style={s.empty}>No invoices yet.</Text></View>:records.map(x=><View key={x.id} style={s.card}><View style={s.row}><Text style={s.name}>{x.name}</Text><TouchableOpacity onPress={()=>del(x.id)}><Text style={s.delete}>DELETE</Text></TouchableOpacity></View><Text style={s.gray}>Invoice: {x.invoice}</Text><Text style={s.green}>Original: ₹ {money(x.original)}</Text>{!master?<Text style={s.red}>Original Due: ₹ {money(x.original)}</Text>:<View style={s.masterBox}><Text style={s.purpleText}>Second: ₹ {money(x.second)}</Text><Text style={s.red}>TOTAL DUE: ₹ {money(Number(x.original)+Number(x.second))}</Text></View>}</View>)}<View style={{height:60}}/></ScrollView></SafeAreaView>;
+          }
+          const s=StyleSheet.create({page:{flex:1,backgroundColor:'#F3F6FA'},header:{backgroundColor:'#0759A8',padding:20},logo:{color:'#fff',fontSize:25,fontWeight:'bold'},sub:{color:'#DCEEFF',marginTop:5},box:{backgroundColor:'#fff',margin:12,padding:15,borderRadius:10,elevation:2},title:{fontSize:18,fontWeight:'bold',marginBottom:10},input:{borderWidth:1,borderColor:'#ccc',borderRadius:8,padding:12,marginBottom:10},secret:{borderWidth:1,borderColor:'#7B1FA2',borderRadius:8,padding:12,marginBottom:10},blue:{backgroundColor:'#0759A8',padding:14,borderRadius:8,alignItems:'center'},purple:{backgroundColor:'#7B1FA2',padding:14,borderRadius:8,alignItems:'center'},bt:{color:'#fff',fontWeight:'bold'},close:{backgroundColor:'#FCE4EC',padding:13,borderRadius:8,alignItems:'center'},closeText:{color:'#C2185B',fontWeight:'bold'},stats:{flexDirection:'row',flexWrap:'wrap',marginHorizontal:8},stat:{backgroundColor:'#fff',margin:4,padding:12,borderRadius:10,minWidth:105,flexGrow:1},label:{color:'#777',fontSize:11,fontWeight:'bold'},value:{color:'#0759A8',fontSize:17,fontWeight:'bold',marginTop:5},list:{fontSize:19,fontWeight:'bold',margin:14},card:{backgroundColor:'#fff',marginHorizontal:12,marginBottom:10,padding:15,borderRadius:10,elevation:2},row:{flexDirection:'row',justifyContent:'space-between'},name:{fontSize:17,fontWeight:'bold',flex:1},delete:{color:'#C62828',fontWeight:'bold'},gray:{color:'#666',marginTop:5},green:{color:'#16835C',fontSize:16,fontWeight:'bold',marginTop:7},red:{color:'#C62828',fontSize:16,fontWeight:'bold',marginTop:5},masterBox:{marginTop:10,padding:10,backgroundColor:'#F3E5F5',borderRadius:8},purpleText:{color:'#7B1FA2',fontWeight:'bold'},empty:{textAlign:'center',color:'#888'}});
+          APPJS
 
-          const DATA_KEY = "VYAPAR_KHATA_DATA";
-          const MASTER_PIN = "9999";
+      - name: Prebuild Android
+        working-directory: vyapar-khata
+        run: npx expo prebuild --platform android --no-install
 
-          export default function App() {
-            const [records, setRecords] = useState([]);
-            const [name, setName] = useState("");
-            const [invoice, setInvoice] = useState("");
-            const [original, setOriginal] = useState("");
-            const [second, setSecond] = useState("");
-            const [master, setMaster] = useState(false);
-            const [pin, setPin] = useState("");
+      - name: Force Android API 36
+        working-directory: vyapar-khata
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('android/app/build.gradle')
+          if not p.exists(): raise SystemExit('android/app/build.gradle not found')
+          d=p.read_text()
+          d=re.sub(r'targetSdkVersion\s+\d+','targetSdkVersion 36',d)
+          d=re.sub(r'compileSdkVersion\s+\d+','compileSdkVersion 36',d)
+          d=re.sub(r'compileSdk\s*=\s*\d+','compileSdk = 36',d)
+          d=re.sub(r'targetSdk\s*=\s*\d+','targetSdk = 36',d)
+          p.write_text(d)
+          print('API 36 configured')
+          PY
 
-            useEffect(() => {
-              loadData();
-            }, []);
+      - name: Configure Gradle
+        working-directory: vyapar-khata
+        run: |
+          echo 'android.suppressUnsupportedCompileSdk=36' >> android/gradle.properties
+          echo 'org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m' >> android/gradle.properties
 
-            async function loadData() {
-              try {
-                const saved = await AsyncStorage.getItem(DATA_KEY);
-                if (saved) setRecords(JSON.parse(saved));
-              } catch (error) {
-                console.log("Load error:", error);
-              }
-            }
-
-            async function saveData(list) {
-              try {
+      - name: Restore Existing Upload Key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}

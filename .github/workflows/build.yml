@@ -11,6 +11,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Debug File Structure
+        run: |
+          echo "=== Full Directory Tree ==="
+          find . -maxdepth 4 -not -path '*/.*'
+          
+          echo "=== Searching for package.json across ALL folders ==="
+          find . -name "package.json"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -25,9 +33,13 @@ jobs:
       - name: Locate project directory
         id: locate
         run: |
-          PKG_PATH=$(find . -maxdepth 3 -name "package.json" -not -path "*/node_modules/*" | head -n 1)
+          PKG_PATH=$(find . -name "package.json" -not -path "*/node_modules/*" | head -n 1)
           if [ -z "$PKG_PATH" ]; then
-            echo "ERROR: Could not find package.json anywhere in repository."
+            echo "ERROR: package.json is missing from this Git repository."
+            echo "Please push package.json from your local machine to GitHub:"
+            echo "  git add package.json"
+            echo "  git commit -m 'Add package.json'"
+            echo "  git push origin main"
             exit 1
           fi
           PROJECT_DIR=$(dirname "$PKG_PATH")

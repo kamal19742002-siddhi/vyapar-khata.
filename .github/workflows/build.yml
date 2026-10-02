@@ -1,4 +1,4 @@
-```yaml
+
 name: Build Vyapar Khata AAB
 
 on:
@@ -761,4 +761,4 @@ jobs:
           path: vyapar-khata/android/**/*.aab
           if-no-files-found: error
           retention-days: 7
-```
+

@@ -11,18 +11,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Debug File Structure
-        run: |
-          echo "=== Full Directory Tree ==="
-          find . -maxdepth 4 -not -path '*/.*'
-          
-          echo "=== Searching for package.json across ALL folders ==="
-          find . -name "package.json"
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -30,31 +23,36 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Locate project directory
+      - name: Locate project
         id: locate
         run: |
-          PKG_PATH=$(find . -name "package.json" -not -path "*/node_modules/*" | head -n 1)
+          PKG_PATH=$(find . -name "package.json" \
+            -not -path "*/node_modules/*" | head -n 1)
+
           if [ -z "$PKG_PATH" ]; then
-            echo "ERROR: package.json is missing from this Git repository."
-            echo "Please push package.json from your local machine to GitHub:"
-            echo "  git add package.json"
-            echo "  git commit -m 'Add package.json'"
-            echo "  git push origin main"
+            echo "ERROR: package.json not found"
             exit 1
           fi
+
           PROJECT_DIR=$(dirname "$PKG_PATH")
-          echo "Found package.json in: $PROJECT_DIR"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Project: $PROJECT_DIR"
 
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_DIR }}
-        run: npm ci || npm install
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Expo prebuild
         working-directory: ${{ env.PROJECT_DIR }}
-        run: npx expo prebuild --platform android --no-install
+        run: |
+          npx expo prebuild --platform android --no-install
 
-      - name: Set Android version
+      - name: Configure Android API 36
         working-directory: ${{ env.PROJECT_DIR }}/android
         run: |
           python3 - <<'PY'
@@ -62,24 +60,45 @@ jobs:
           import re
 
           path = Path("app/build.gradle")
-          if not path.exists():
-              path = Path("app/build.gradle.kts")
 
           if not path.exists():
               raise SystemExit("ERROR: app/build.gradle not found")
 
           text = path.read_text()
 
-          text = re.sub(r"versionCode\s*=*\s*\d+", "versionCode 2001", text)
-          text = re.sub(r"targetSdkVersion\s*=*\s*[\w\.]+", "targetSdkVersion 36", text)
-          text = re.sub(r"compileSdkVersion\s*=*\s*[\w\.]+", "compileSdkVersion 36", text)
+          # compileSdk
+          text = re.sub(
+              r'compileSdk(?:Version)?\s*=?\s*\d+',
+              'compileSdk 36',
+              text
+          )
+
+          # targetSdk
+          text = re.sub(
+              r'targetSdk(?:Version)?\s*=?\s*\d+',
+              'targetSdk 36',
+              text
+          )
+
+          # versionCode
+          if re.search(r'versionCode\s*=?\s*\d+', text):
+              text = re.sub(
+                  r'versionCode\s*=?\s*\d+',
+                  'versionCode 2001',
+                  text
+              )
+          else:
+              text = text.replace(
+                  'defaultConfig {',
+                  'defaultConfig {\n        versionCode 2001',
+                  1
+              )
 
           path.write_text(text)
-
-          print("versionCode = 2001")
-          print("targetSdkVersion = 36")
-          print("compileSdkVersion = 36")
           PY
+
+          echo "=== Android configuration ==="
+          grep -nE "compileSdk|targetSdk|versionCode" app/build.gradle || true
 
       - name: Restore upload keystore
         working-directory: ${{ env.PROJECT_DIR }}
@@ -87,20 +106,21 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "ERROR: KEYSTORE_BASE64 secret is missing."
+            echo "ERROR: KEYSTORE_BASE64 secret is missing"
             exit 1
           fi
 
           mkdir -p android/app
 
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode \
+            > android/app/upload-keystore.jks
 
           if [ ! -s android/app/upload-keystore.jks ]; then
-            echo "ERROR: Keystore file was not created."
+            echo "ERROR: Keystore was not created"
             exit 1
           fi
 
-          echo "Upload keystore restored successfully."
+          echo "Keystore restored successfully"
 
       - name: Configure release signing
         working-directory: ${{ env.PROJECT_DIR }}/android
@@ -111,38 +131,54 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           path = Path("app/build.gradle")
-          if not path.exists():
-              path = Path("app/build.gradle.kts")
-
-          if not path.exists():
-              raise SystemExit("ERROR: app/build.gradle not found")
-
           text = path.read_text()
 
-          signing_block = """
-              release {
-                  storeFile file('upload-keystore.jks')
-                  storePassword System.getenv('KEYSTORE_PASSWORD')
-                  keyAlias System.getenv('KEY_ALIAS')
-                  keyPassword System.getenv('KEY_PASSWORD')
-              }
-          """
-
           if "upload-keystore.jks" not in text:
-              if "signingConfigs {" in text:
-                  text = text.replace("signingConfigs {", "signingConfigs {\n" + signing_block, 1)
-              else:
-                  text = text.replace("android {", "android {\nsigningConfigs {\n" + signing_block + "\n}", 1)
+              signing = """
+              signingConfigs {
+                  release {
+                      storeFile file('upload-keystore.jks')
+                      storePassword System.getenv('KEYSTORE_PASSWORD')
+                      keyAlias System.getenv('KEY_ALIAS')
+                      keyPassword System.getenv('KEY_PASSWORD')
+                  }
+              }
+              """
 
-          text = re.sub(r'signingConfig\s+signingConfigs\.debug', 'signingConfig signingConfigs.release', text)
+              text = text.replace(
+                  "android {",
+                  "android {\n" + signing,
+                  1
+              )
+
+          text = text.replace(
+              "signingConfig signingConfigs.debug",
+              "signingConfig signingConfigs.release"
+          )
+
+          if "signingConfig signingConfigs.release" not in text:
+              text = text.replace(
+                  "buildTypes {",
+                  """buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }""",
+                  1
+              )
 
           path.write_text(text)
-
-          print("Release signing configured.")
           PY
+
+          echo "Release signing configured"
+
+      - name: Verify Android configuration
+        working-directory: ${{ env.PROJECT_DIR }}/android
+        run: |
+          echo "=== Final Gradle configuration ==="
+          grep -nE "compileSdk|targetSdk|versionCode|signingConfig" \
+            app/build.gradle || true
 
       - name: Build release AAB
         working-directory: ${{ env.PROJECT_DIR }}/android
@@ -152,21 +188,21 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           chmod +x gradlew
+          ./gradlew clean
           ./gradlew bundleRelease --no-daemon
 
       - name: Find AAB
         run: |
-          echo "Searching for AAB..."
-
-          AAB=$(find . -type f -name "*.aab" | head -n 1)
+          AAB=$(find "${{ env.PROJECT_DIR }}/android" \
+            -type f -name "*.aab" | head -n 1)
 
           if [ -z "$AAB" ]; then
-            echo "ERROR: AAB NOT FOUND"
+            echo "ERROR: AAB was not generated"
             exit 1
           fi
 
           echo "AAB FOUND: $AAB"
-          echo "AAB_PATH=$AAB" >> $GITHUB_ENV
+          echo "AAB_PATH=$AAB" >> "$GITHUB_ENV"
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4

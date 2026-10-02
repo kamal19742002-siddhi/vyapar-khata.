@@ -40,7 +40,7 @@ jobs:
           echo "package.json found."
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci || npm install
 
       - name: Expo prebuild
         run: npx expo prebuild --platform android --no-install
@@ -53,29 +53,17 @@ jobs:
           import re
 
           path = Path("app/build.gradle")
+          if not path.exists():
+              path = Path("app/build.gradle.kts")
 
           if not path.exists():
               raise SystemExit("ERROR: android/app/build.gradle not found")
 
           text = path.read_text()
 
-          text = re.sub(
-              r"versionCode\s+\d+",
-              "versionCode 2001",
-              text
-          )
-
-          text = re.sub(
-              r"targetSdkVersion\s+\d+",
-              "targetSdkVersion 36",
-              text
-          )
-
-          text = re.sub(
-              r"compileSdkVersion\s+\d+",
-              "compileSdkVersion 36",
-              text
-          )
+          text = re.sub(r"versionCode\s*=*\s*\d+", "versionCode 2001", text)
+          text = re.sub(r"targetSdkVersion\s*=*\s*[\w\.]+", "targetSdkVersion 36", text)
+          text = re.sub(r"compileSdkVersion\s*=*\s*[\w\.]+", "compileSdkVersion 36", text)
 
           path.write_text(text)
 
@@ -116,6 +104,8 @@ jobs:
           import re
 
           path = Path("app/build.gradle")
+          if not path.exists():
+              path = Path("app/build.gradle.kts")
 
           if not path.exists():
               raise SystemExit("ERROR: app/build.gradle not found")
@@ -132,30 +122,12 @@ jobs:
           """
 
           if "upload-keystore.jks" not in text:
-              match = re.search(r"signingConfigs\s*\{", text)
-
-              if match:
-                  pos = match.end()
-                  text = text[:pos] + signing_block + text[pos:]
+              if "signingConfigs {" in text:
+                  text = text.replace("signingConfigs {", "signingConfigs {\n" + signing_block, 1)
               else:
-                  text = text.replace(
-                      "android {",
-                      """android {
-              signingConfigs {
-                  release {
-                      storeFile file('upload-keystore.jks')
-                      storePassword System.getenv('KEYSTORE_PASSWORD')
-                      keyAlias System.getenv('KEY_ALIAS')
-                      keyPassword System.getenv('KEY_PASSWORD')
-                  }
-              }""",
-                      1
-                  )
+                  text = text.replace("android {", "android {\nsigningConfigs {\n" + signing_block + "\n}", 1)
 
-          text = text.replace(
-              "signingConfig signingConfigs.debug",
-              "signingConfig signingConfigs.release"
-          )
+          text = re.sub(r'signingConfig\s+signingConfigs\.debug', 'signingConfig signingConfigs.release', text)
 
           path.write_text(text)
 

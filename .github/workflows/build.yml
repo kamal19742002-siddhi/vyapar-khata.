@@ -3,10 +3,6 @@ name: Build Vyapar Khata AAB
 on:
   workflow_dispatch:
 
-defaults:
-  run:
-    working-directory: github
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -26,30 +22,28 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Check project files
+      - name: Locate project directory
+        id: locate
         run: |
-          echo "Current directory:"
-          pwd
-          echo ""
-          echo "Project files:"
-          ls -la
-          echo ""
-
-          if [ ! -f package.json ]; then
-            echo "ERROR: package.json is not in working directory."
+          PKG_PATH=$(find . -maxdepth 3 -name "package.json" -not -path "*/node_modules/*" | head -n 1)
+          if [ -z "$PKG_PATH" ]; then
+            echo "ERROR: Could not find package.json anywhere in repository."
             exit 1
           fi
-
-          echo "package.json found."
+          PROJECT_DIR=$(dirname "$PKG_PATH")
+          echo "Found package.json in: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
 
       - name: Install dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
         run: npm ci || npm install
 
       - name: Expo prebuild
+        working-directory: ${{ env.PROJECT_DIR }}
         run: npx expo prebuild --platform android --no-install
 
       - name: Set Android version
-        working-directory: github/android
+        working-directory: ${{ env.PROJECT_DIR }}/android
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -60,7 +54,7 @@ jobs:
               path = Path("app/build.gradle.kts")
 
           if not path.exists():
-              raise SystemExit("ERROR: android/app/build.gradle not found")
+              raise SystemExit("ERROR: app/build.gradle not found")
 
           text = path.read_text()
 
@@ -76,6 +70,7 @@ jobs:
           PY
 
       - name: Restore upload keystore
+        working-directory: ${{ env.PROJECT_DIR }}
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
@@ -96,7 +91,7 @@ jobs:
           echo "Upload keystore restored successfully."
 
       - name: Configure release signing
-        working-directory: github/android
+        working-directory: ${{ env.PROJECT_DIR }}/android
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -138,7 +133,7 @@ jobs:
           PY
 
       - name: Build release AAB
-        working-directory: github/android
+        working-directory: ${{ env.PROJECT_DIR }}/android
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -151,23 +146,20 @@ jobs:
         run: |
           echo "Searching for AAB..."
 
-          find android -type f -name "*.aab" -print
-
-          AAB=$(find android -type f -name "*.aab" | head -n 1)
+          AAB=$(find . -type f -name "*.aab" | head -n 1)
 
           if [ -z "$AAB" ]; then
             echo "ERROR: AAB NOT FOUND"
             exit 1
           fi
 
-          echo ""
-          echo "AAB FOUND:"
-          echo "$AAB"
+          echo "AAB FOUND: $AAB"
+          echo "AAB_PATH=$AAB" >> $GITHUB_ENV
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
           name: vyapar-khata-aab
-          path: github/android/app/build/outputs/bundle/release/*.aab
+          path: ${{ env.AAB_PATH }}
           if-no-files-found: error
           retention-days: 7

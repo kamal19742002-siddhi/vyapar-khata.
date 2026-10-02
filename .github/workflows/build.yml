@@ -1,4 +1,4 @@
-
+```yaml
 name: Build Vyapar Khata AAB
 
 on:
@@ -821,7 +821,7 @@ jobs:
           import re
 
           data = re.sub(
-              r'targetSdkVersion\s+\d+',
+            r'targetSdkVersion\s+\d+',
               'targetSdkVersion 36',
               data
           )

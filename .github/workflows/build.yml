@@ -1,4 +1,3 @@
-
 name: Build Vyapar Khata AAB
 
 on:
@@ -16,6 +15,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: "npm"
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -23,13 +23,29 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
+      - name: Check project files
+        run: |
+          echo "Current directory:"
+          pwd
+          echo ""
+          echo "Project files:"
+          ls -la
+          echo ""
+
+          if [ ! -f package.json ]; then
+            echo "ERROR: package.json is not in repository root."
+            exit 1
+          fi
+
+          echo "package.json found."
+
       - name: Install dependencies
         run: npm install
 
       - name: Expo prebuild
         run: npx expo prebuild --platform android --no-install
 
-      - name: Set version code
+      - name: Set Android version
         working-directory: android
         run: |
           python3 - <<'PY'
@@ -39,7 +55,7 @@ jobs:
           path = Path("app/build.gradle")
 
           if not path.exists():
-              raise SystemExit("app/build.gradle not found")
+              raise SystemExit("ERROR: android/app/build.gradle not found")
 
           text = path.read_text()
 
@@ -68,12 +84,12 @@ jobs:
           print("compileSdkVersion = 36")
           PY
 
-      - name: Restore upload key
+      - name: Restore upload keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "KEYSTORE_BASE64 secret is missing."
+            echo "ERROR: KEYSTORE_BASE64 secret is missing."
             exit 1
           fi
 
@@ -82,33 +98,59 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
 
           if [ ! -s android/app/upload-keystore.jks ]; then
-            echo "Keystore file was not created."
+            echo "ERROR: Keystore file was not created."
             exit 1
           fi
 
-          echo "Upload keystore restored."
+          echo "Upload keystore restored successfully."
 
-      - name: Configure signing
+      - name: Configure release signing
         working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("app/build.gradle")
+
+          if not path.exists():
+              raise SystemExit("ERROR: app/build.gradle not found")
+
           text = path.read_text()
 
+          signing_block = """
+              release {
+                  storeFile file('upload-keystore.jks')
+                  storePassword System.getenv('KEYSTORE_PASSWORD')
+                  keyAlias System.getenv('KEY_ALIAS')
+                  keyPassword System.getenv('KEY_PASSWORD')
+              }
+          """
+
           if "upload-keystore.jks" not in text:
-              text = text.replace(
-                  "signingConfigs {",
-                  """signingConfigs {
+              match = re.search(r"signingConfigs\s*\{", text)
+
+              if match:
+                  pos = match.end()
+                  text = text[:pos] + signing_block + text[pos:]
+              else:
+                  text = text.replace(
+                      "android {",
+                      """android {
+              signingConfigs {
                   release {
                       storeFile file('upload-keystore.jks')
                       storePassword System.getenv('KEYSTORE_PASSWORD')
                       keyAlias System.getenv('KEY_ALIAS')
                       keyPassword System.getenv('KEY_PASSWORD')
-                  }""",
-                  1
-              )
+                  }
+              }""",
+                      1
+                  )
 
           text = text.replace(
               "signingConfig signingConfigs.debug",
@@ -116,6 +158,7 @@ jobs:
           )
 
           path.write_text(text)
+
           print("Release signing configured.")
           PY
 
@@ -138,10 +181,11 @@ jobs:
           AAB=$(find android -type f -name "*.aab" | head -n 1)
 
           if [ -z "$AAB" ]; then
-            echo "AAB NOT FOUND"
+            echo "ERROR: AAB NOT FOUND"
             exit 1
           fi
 
+          echo ""
           echo "AAB FOUND:"
           echo "$AAB"
 
@@ -152,4 +196,3 @@ jobs:
           path: android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
           retention-days: 7
-

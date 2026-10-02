@@ -1,457 +1,101 @@
+              data
+          )
 
-name: Build Vyapar Khata AAB
+          data = re.sub(
+              r'targetSdk\s*=\s*\d+',
+              'targetSdk = 36',
+              data
+          )
 
-on:
-  workflow_dispatch:
+          p.write_text(data)
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+          print("Android target SDK forced to 36.")
+          PY
 
-    steps:
-
-      # =========================================================
-      # NODE
-      # =========================================================
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      # =========================================================
-      # JAVA
-      # =========================================================
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      # =========================================================
-      # CREATE EXPO APP
-      # =========================================================
-      - name: Create Expo App
-        run: |
-          npx --yes create-expo-app@latest vyapar-khata --template blank@sdk-51 --no-install
-          cd vyapar-khata
-          npm install
-          npx expo install @react-native-async-storage/async-storage
-
-      # =========================================================
-      # CONFIGURE APP
-      # =========================================================
-      - name: Configure App
+      - name: Configure Gradle
         working-directory: vyapar-khata
+        run: |
+          echo "android.suppressUnsupportedCompileSdk=36" >> android/gradle.properties
+          echo "org.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=512m" >> android/gradle.properties
+
+      - name: Restore Release Upload Key
         env:
-          RUN_NUMBER: ${{ github.run_number }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          node <<'NODE'
-          const fs = require("fs");
+          test -n "$KEYSTORE_BASE64"
+          mkdir -p vyapar-khata/android/app
+          echo "$KEYSTORE_BASE64" | base64 --decode > vyapar-khata/android/app/upload-keystore.jks
+          test -s vyapar-khata/android/app/upload-keystore.jks
+          echo "Existing upload keystore restored."
 
-          const app = JSON.parse(
-            fs.readFileSync("app.json", "utf8")
-          );
+      - name: Configure Release Signing
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          cd vyapar-khata/android
 
-          app.expo.name = "Vyapar Khata";
-          app.expo.slug = "vyapar-khata";
+          python3 - <<'PY'
+          from pathlib import Path
 
-          const runNumber = parseInt(
-            process.env.RUN_NUMBER || "1",
-            10
-          );
+          p = Path("app/build.gradle")
+          data = p.read_text()
 
-          app.expo.version = `2.0.${runNumber}`;
+          if "signingConfigs {" not in data:
+              raise SystemExit("signingConfigs block not found")
 
-          app.expo.android = {
-            ...(app.expo.android || {}),
-            package: "com.vyapar.khatabook.free",
-            versionCode: 2000 + runNumber
-          };
+          block = """
+                  release {
+                      storeFile file('upload-keystore.jks')
+                      storePassword System.getenv('KEYSTORE_PASSWORD')
+                      keyAlias System.getenv('KEY_ALIAS')
+                      keyPassword System.getenv('KEY_PASSWORD')
+                  }
+          """
 
-          fs.writeFileSync(
-            "app.json",
-            JSON.stringify(app, null, 2)
-          );
+          if "storeFile file('upload-keystore.jks')" not in data:
+              data = data.replace(
+                  "signingConfigs {",
+                  "signingConfigs {" + block,
+                  1
+              )
 
-          console.log(
-            "Version code:",
-            2000 + runNumber
-          );
-          NODE
+          data = data.replace(
+              "signingConfig signingConfigs.debug",
+              "signingConfig signingConfigs.release"
+          )
 
-      # =========================================================
-      # CREATE APP.JS
-      # =========================================================
-      - name: Create App.js
+          p.write_text(data)
+          print("Release signing configured.")
+          PY
+
+      - name: Verify Android Configuration
         working-directory: vyapar-khata
         run: |
-          cat > App.js <<'APPJS'
-          import React, { useEffect, useState } from "react";
-
-          import {
-            SafeAreaView,
-            ScrollView,
-            View,
-            Text,
-            TextInput,
-            TouchableOpacity,
-            StyleSheet,
-            Alert,
-            StatusBar
-          } from "react-native";
-
-          import AsyncStorage from "@react-native-async-storage/async-storage";
-
-          const DATA_KEY = "VYAPAR_KHATA_DATA";
-          const MASTER_PIN = "9999";
-
-          export default function App() {
-
-            const [records, setRecords] = useState([]);
-
-            const [name, setName] = useState("");
-            const [invoice, setInvoice] = useState("");
-            const [original, setOriginal] = useState("");
-            const [second, setSecond] = useState("");
-
-            const [master, setMaster] = useState(false);
-            const [pin, setPin] = useState("");
-
-            useEffect(() => {
-              loadData();
-            }, []);
-
-            async function loadData() {
-              try {
-                const saved =
-                  await AsyncStorage.getItem(DATA_KEY);
-
-                if (saved) {
-                  setRecords(JSON.parse(saved));
-                }
-              } catch (error) {
-                console.log("Load error:", error);
-              }
-            }
-
-            async function saveData(list) {
-              try {
-                setRecords(list);
-
-                await AsyncStorage.setItem(
-                  DATA_KEY,
-                  JSON.stringify(list)
-                );
-              } catch (error) {
-                Alert.alert(
-                  "Storage Error",
-                  "Data save nahi ho paya."
-                );
-              }
-            }
-
-            function unlockMaster() {
-
-              if (pin === MASTER_PIN) {
-
-                setMaster(true);
-                setPin("");
-
-                Alert.alert(
-                  "Master Open",
-                  "Master ledger open ho gaya."
-                );
-
-              } else {
-
-                Alert.alert(
-                  "Access Denied",
-                  "Wrong Master PIN"
-                );
-
-                setPin("");
-              }
-            }
-
-            function addInvoice() {
-
-              if (
-                !name.trim() ||
-                !invoice.trim() ||
-                !original.trim()
-              ) {
-
-                Alert.alert(
-                  "Required",
-                  "Customer, Invoice aur Original Amount bharein."
-                );
-
-                return;
-              }
-
-              const originalAmount =
-                Number(original);
-
-              if (
-                !Number.isFinite(originalAmount) ||
-                originalAmount < 0
-              ) {
-
-                Alert.alert(
-                  "Invalid Amount",
-                  "Please valid amount enter karein."
-                );
-
-                return;
-              }
-
-              const secondAmount =
-                master && second.trim()
-                  ? Number(second)
-                  : 0;
-
-              if (
-                !Number.isFinite(secondAmount) ||
-                secondAmount < 0
-              ) {
-
-                Alert.alert(
-                  "Invalid Amount",
-                  "Second Amount valid hona chahiye."
-                );
-
-                return;
-              }
-
-              const item = {
-                id: Date.now(),
-                name: name.trim(),
-                invoice: invoice.trim(),
-                original: originalAmount,
-                second: master ? secondAmount : 0,
-                createdAt: new Date().toISOString()
-              };
-
-              saveData([
-                item,
-                ...records
-              ]);
-
-              setName("");
-              setInvoice("");
-              setOriginal("");
-              setSecond("");
-
-              Alert.alert(
-                "Saved",
-                "Invoice successfully save ho gaya."
-              );
-            }
-
-            function deleteInvoice(id) {
-
-              Alert.alert(
-                "Delete",
-                "Kya ye invoice delete karna hai?",
-                [
-                  {
-                    text: "Cancel",
-                    style: "cancel"
-                  },
-                  {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: () => {
-
-                      const list =
-                        records.filter(
-                          item => item.id !== id
-                        );
-
-                      saveData(list);
-                    }
-                  }
-                ]
-              );
-            }
-
-            function formatAmount(amount) {
-
-              return Number(amount || 0)
-                .toLocaleString("en-IN");
-            }
-
-            const totalOriginal =
-              records.reduce(
-                (sum, item) =>
-                  sum + Number(item.original || 0),
-                0
-              );
-
-            const totalSecond =
-              records.reduce(
-                (sum, item) =>
-                  sum + Number(item.second || 0),
-                0
-              );
-
-            const totalDue =
-              totalOriginal + totalSecond;
-
-            return (
-              <SafeAreaView style={styles.page}>
-
-                <StatusBar
-                  barStyle="light-content"
-                  backgroundColor="#0759A8"
-                />
-
-                <ScrollView
-                  keyboardShouldPersistTaps="handled"
-                >
-
-                  <View style={styles.header}>
-
-                    <Text style={styles.logo}>
-                      Vyapar Khata
-                    </Text>
-
-                    <Text style={styles.subtitle}>
-                      {master
-                        ? "MASTER CONSOLIDATED VIEW"
-                        : "OFFICIAL REGULAR VIEW"}
-                    </Text>
-
-                  </View>
-
-                  {!master ? (
-
-                    <View style={styles.box}>
-
-                      <Text style={styles.title}>
-                        Master Access
-                      </Text>
-
-                      <Text style={styles.description}>
-                        Private consolidated ledger ke liye
-                        Master PIN enter karein.
-                      </Text>
-
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Master PIN"
-                        keyboardType="numeric"
-                        secureTextEntry
-                        value={pin}
-                        onChangeText={setPin}
-                        maxLength={8}
-                      />
-
-                      <TouchableOpacity
-                        style={styles.masterButton}
-                        onPress={unlockMaster}
-                      >
-
-                        <Text style={styles.buttonText}>
-                          OPEN MASTER
-                        </Text>
-
-                      </TouchableOpacity>
-
-                    </View>
-
-                  ) : (
-
-                    <View style={styles.box}>
-
-                      <TouchableOpacity
-                        style={styles.closeButton}
-                        onPress={() => setMaster(false)}
-                      >
-
-                        <Text style={styles.closeText}>
-                          CLOSE MASTER MODE
-                        </Text>
-
-                      </TouchableOpacity>
-
-                    </View>
-                  )}
-
-                  <View style={styles.dashboard}>
-
-                    <View style={styles.statCard}>
-
-                      <Text style={styles.statLabel}>
-                        INVOICES
-                      </Text>
-
-                      <Text style={styles.statValue}>
-                        {records.length}
-                      </Text>
-
-                    </View>
-
-                    <View style={styles.statCard}>
-
-                      <Text style={styles.statLabel}>
-                        ORIGINAL
-                      </Text>
-
-                      <Text style={styles.statValue}>
-                        ₹ {formatAmount(totalOriginal)}
-                      </Text>
-
-                    </View>
-
-                    {master && (
-
-                      <View style={styles.statCard}>
-
-                        <Text style={styles.statLabel}>
-                          TOTAL DUE
-                        </Text>
-
-                        <Text style={styles.statValue}>
-                          ₹ {formatAmount(totalDue)}
-                        </Text>
-
-                      </View>
-
-                    )}
-
-                  </View>
-
-                  <View style={styles.box}>
-
-                    <Text style={styles.title}>
-                      New Invoice
-                    </Text>
-
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Customer Name"
-                      value={name}
-                      onChangeText={setName}
-                    />
-
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Invoice Number"
-                      value={invoice}
-                      onChangeText={setInvoice}
-                    />
-
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Original Invoice Amount"
-                      keyboardType="numeric"
-                      value={original}
-                      onChangeText={setOriginal}
-                    />
-
-                    {master && (
-
-                      <TextInput
-                        style={styles.secretInput}
-                        placeholder="
+          echo "===== APP CONFIG ====="
+          cat app.json
+
+          echo "===== ANDROID SDK / VERSION ====="
+          grep -n -E "compileSdk|targetSdk|versionCode|versionName" android/app/build.gradle || true
+
+          echo "===== GRADLE PROPERTIES ====="
+          cat android/gradle.properties
+
+      - name: Build Release AAB
+        working-directory: vyapar-khata/android
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          NODE_ENV: production
+        run: |
+          chmod +x gradlew
+          ./gradlew clean bundleRelease --no-daemon
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: vyapar-khata-release
+          path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab

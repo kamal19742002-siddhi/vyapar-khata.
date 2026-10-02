@@ -26,6 +26,7 @@ jobs:
           cd vyapar-khata
 
           npm install
+
           npx expo install @react-native-async-storage/async-storage
 
       - name: Configure App
@@ -353,6 +354,301 @@ jobs:
                               <Text style={styles.delete}>
                                 DELETE
                               </Text>
+                            </TouchableOpacity>
+
+                          </View>
+
+                          <Text style={styles.invoice}>
+                            Invoice: {item.invoice}
+                          </Text>
+
+                          <Text style={styles.original}>
+                            Original Invoice: ₹
+                            {originalAmount.toLocaleString("en-IN")}
+                          </Text>
+
+                          {!master ? (
+
+                            <Text style={styles.due}>
+                              Original Due: ₹
+                              {originalAmount.toLocaleString("en-IN")}
+                            </Text>
+
+                          ) : (
+
+                            <View style={styles.masterBox}>
+
+                              <Text style={styles.second}>
+                                Second Amount: ₹
+                                {secondAmount.toLocaleString("en-IN")}
+                              </Text>
+
+                              <Text style={styles.total}>
+                                TOTAL DUE: ₹
+                                {totalDue.toLocaleString("en-IN")}
+                              </Text>
+
+                            </View>
+
+                          )}
+
+                        </View>
+                      );
+                    })
+                  )}
+
+                  <View style={{ height: 50 }} />
+
+                </ScrollView>
+              </SafeAreaView>
+            );
+          }
+
+          const styles = StyleSheet.create({
+
+            page: {
+              flex: 1,
+              backgroundColor: "#F3F6FA"
+            },
+
+            header: {
+              backgroundColor: "#0759A8",
+              padding: 20
+            },
+
+            logo: {
+              color: "#FFFFFF",
+              fontSize: 25,
+              fontWeight: "bold"
+            },
+
+            subtitle: {
+              color: "#DCEEFF",
+              marginTop: 5,
+              fontSize: 13
+            },
+
+            box: {
+              backgroundColor: "#FFFFFF",
+              margin: 12,
+              padding: 15,
+              borderRadius: 10,
+              elevation: 2
+            },
+
+            title: {
+              fontSize: 18,
+              fontWeight: "bold",
+              marginBottom: 12
+            },
+
+            input: {
+              borderWidth: 1,
+              borderColor: "#CCCCCC",
+              borderRadius: 8,
+              padding: 12,
+              marginBottom: 10,
+              backgroundColor: "#FFFFFF"
+            },
+
+            secretInput: {
+              borderWidth: 1,
+              borderColor: "#7B1FA2",
+              borderRadius: 8,
+              padding: 12,
+              marginBottom: 10,
+              backgroundColor: "#FDF7FF"
+            },
+
+            saveButton: {
+              backgroundColor: "#0759A8",
+              padding: 14,
+              borderRadius: 8,
+              alignItems: "center"
+            },
+
+            masterButton: {
+              backgroundColor: "#7B1FA2",
+              padding: 14,
+              borderRadius: 8,
+              alignItems: "center"
+            },
+
+            buttonText: {
+              color: "#FFFFFF",
+              fontWeight: "bold",
+              fontSize: 15
+            },
+
+            closeButton: {
+              backgroundColor: "#FCE4EC",
+              padding: 13,
+              borderRadius: 8,
+              alignItems: "center"
+            },
+
+            closeText: {
+              color: "#C2185B",
+              fontWeight: "bold"
+            },
+
+            listTitle: {
+              fontSize: 19,
+              fontWeight: "bold",
+              marginHorizontal: 14,
+              marginTop: 8,
+              marginBottom: 5
+            },
+
+            card: {
+              backgroundColor: "#FFFFFF",
+              marginHorizontal: 12,
+              marginBottom: 10,
+              padding: 15,
+              borderRadius: 10,
+              elevation: 2
+            },
+
+            row: {
+              flexDirection: "row",
+              justifyContent: "space-between"
+            },
+
+            name: {
+              fontSize: 17,
+              fontWeight: "bold"
+            },
+
+            delete: {
+              color: "#C62828",
+              fontWeight: "bold"
+            },
+
+            invoice: {
+              color: "#666666",
+              marginTop: 4
+            },
+
+            original: {
+              color: "#16835C",
+              fontSize: 16,
+              fontWeight: "bold",
+              marginTop: 7
+            },
+
+            due: {
+              color: "#C62828",
+              fontSize: 16,
+              fontWeight: "bold",
+              marginTop: 4
+            },
+
+            masterBox: {
+              marginTop: 10,
+              padding: 10,
+              backgroundColor: "#F3E5F5",
+              borderRadius: 8
+            },
+
+            second: {
+              color: "#7B1FA2",
+              fontSize: 15,
+              fontWeight: "bold"
+            },
+
+            total: {
+              color: "#B71C1C",
+              fontSize: 17,
+              fontWeight: "bold",
+              marginTop: 5
+            },
+
+            empty: {
+              textAlign: "center",
+              color: "#888888"
+            }
+          });
+          APPJS
+
+      - name: Prebuild Android
+        working-directory: vyapar-khata
+        run: |
+          npx expo prebuild --platform android --no-install
+
+      - name: Check Android Gradle
+        run: |
+          test -f vyapar-khata/android/app/build.gradle
+          echo "Android app/build.gradle found."
+
+      - name: Restore SAME Upload Key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64"
+
+          echo "$KEYSTORE_BASE64" | base64 --decode \
+            > vyapar-khata/android/app/upload-keystore.jks
+
+          test -s vyapar-khata/android/app/upload-keystore.jks
+
+          echo "Existing upload keystore restored."
+
+      - name: Configure Release Signing
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          cd vyapar-khata/android
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("app/build.gradle")
+          data = p.read_text()
+
+          if "signingConfigs {" not in data:
+              raise SystemExit("signingConfigs block not found")
+
+          block = """
+              release {
+                  storeFile file('upload-keystore.jks')
+                  storePassword System.getenv('KEYSTORE_PASSWORD')
+                  keyAlias System.getenv('KEY_ALIAS')
+                  keyPassword System.getenv('KEY_PASSWORD')
+              }
+          """
+
+          data = data.replace(
+              "signingConfigs {",
+              "signingConfigs {" + block,
+              1
+          )
+
+          data = data.replace(
+              "signingConfig signingConfigs.debug",
+              "signingConfig signingConfigs.release"
+          )
+
+          p.write_text(data)
+          PY
+
+      - name: Build Release AAB
+        working-directory: vyapar-khata/android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          NODE_ENV: production
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease --no-daemon
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: vyapar-khata-release
+          path: vyapar-khata/android/app/build/outputs/bundle/release/*.aab                          </Text>
                             </TouchableOpacity>
 
                           </View>

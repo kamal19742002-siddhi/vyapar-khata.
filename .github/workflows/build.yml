@@ -15,7 +15,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -25,8 +24,9 @@ jobs:
 
       - name: Locate project
         id: locate
+        shell: bash
         run: |
-          PKG_PATH=$(find . -name "package.json" \
+          PKG_PATH=$(find . -type f -name "package.json" \
             -not -path "*/node_modules/*" | head -n 1)
 
           if [ -z "$PKG_PATH" ]; then
@@ -35,25 +35,32 @@ jobs:
           fi
 
           PROJECT_DIR=$(dirname "$PKG_PATH")
+
+          echo "Found package.json: $PKG_PATH"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Project: $PROJECT_DIR"
 
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
         run: |
           if [ -f package-lock.json ]; then
+            echo "package-lock.json found"
             npm ci
           else
+            echo "No package-lock.json found"
+            echo "Using npm install"
             npm install
           fi
 
       - name: Expo prebuild
         working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
         run: |
           npx expo prebuild --platform android --no-install
 
       - name: Configure Android API 36
         working-directory: ${{ env.PROJECT_DIR }}/android
+        shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -62,7 +69,7 @@ jobs:
           path = Path("app/build.gradle")
 
           if not path.exists():
-              raise SystemExit("ERROR: app/build.gradle not found")
+              raise SystemExit("ERROR: android/app/build.gradle not found")
 
           text = path.read_text()
 
@@ -95,6 +102,10 @@ jobs:
               )
 
           path.write_text(text)
+
+          print("compileSdk = 36")
+          print("targetSdk = 36")
+          print("versionCode = 2001")
           PY
 
           echo "=== Android configuration ==="
@@ -104,6 +115,7 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        shell: bash
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
             echo "ERROR: KEYSTORE_BASE64 secret is missing"
@@ -128,15 +140,20 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
           path = Path("app/build.gradle")
+
+          if not path.exists():
+              raise SystemExit("ERROR: app/build.gradle not found")
+
           text = path.read_text()
 
           if "upload-keystore.jks" not in text:
-              signing = """
+              signing_block = """
               signingConfigs {
                   release {
                       storeFile file('upload-keystore.jks')
@@ -149,7 +166,7 @@ jobs:
 
               text = text.replace(
                   "android {",
-                  "android {\n" + signing,
+                  "android {\n" + signing_block,
                   1
               )
 
@@ -169,14 +186,15 @@ jobs:
               )
 
           path.write_text(text)
+
+          print("Release signing configured")
           PY
 
-          echo "Release signing configured"
-
-      - name: Verify Android configuration
+      - name: Verify configuration
         working-directory: ${{ env.PROJECT_DIR }}/android
+        shell: bash
         run: |
-          echo "=== Final Gradle configuration ==="
+          echo "=== Final Android configuration ==="
           grep -nE "compileSdk|targetSdk|versionCode|signingConfig" \
             app/build.gradle || true
 
@@ -186,15 +204,18 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        shell: bash
         run: |
           chmod +x gradlew
+
           ./gradlew clean
+
           ./gradlew bundleRelease --no-daemon
 
       - name: Find AAB
+        shell: bash
         run: |
-          AAB=$(find "${{ env.PROJECT_DIR }}/android" \
-            -type f -name "*.aab" | head -n 1)
+          AAB=$(find . -type f -name "*.aab" | head -n 1)
 
           if [ -z "$AAB" ]; then
             echo "ERROR: AAB was not generated"

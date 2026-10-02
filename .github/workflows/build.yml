@@ -24,13 +24,32 @@ jobs:
         id: locate
         shell: bash
         run: |
-          PKG_PATH=$(find . -type f -name "package.json" -not -path "*/node_modules/*" | head -n 1)
+          echo "=== Searching for package.json ==="
+          # Locate package.json while safely ignoring node_modules and .git folders
+          PKG_PATH=$(find . -type f -name "package.json" ! -path "*/node_modules/*" ! -path "*/.git/*" | head -n 1)
+          
           if [ -z "$PKG_PATH" ]; then
-            echo "ERROR: package.json not found"
+            echo "ERROR: package.json not found anywhere in the repository!"
+            echo "=== Current Directory Contents ==="
+            ls -la
+            echo "=== Full Directory Tree (Max Depth 2) ==="
+            find . -maxdepth 2 -not -path '*/.*'
             exit 1
           fi
-          PROJECT_DIR=$(dirname "$PKG_PATH")
-          echo "Found package.json: $PKG_PATH"
+          
+          # Clean up the path format (removes leading ./)
+          PKG_PATH=$(echo "$PKG_PATH" | sed 's|^\./||')
+          RELATIVE_DIR=$(dirname "$PKG_PATH")
+          
+          # Convert relative path cleanly to absolute path for reliability across steps
+          if [ "$RELATIVE_DIR" = "." ]; then
+            PROJECT_DIR="$GITHUB_WORKSPACE"
+          else
+            PROJECT_DIR="$GITHUB_WORKSPACE/$RELATIVE_DIR"
+          fi
+          
+          echo "Found package.json at: $PKG_PATH"
+          echo "Project Directory set to: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Install dependencies
@@ -38,8 +57,10 @@ jobs:
         shell: bash
         run: |
           if [ -f package-lock.json ]; then
+            echo "package-lock.json found. Running npm ci..."
             npm ci
           else
+            echo "No package-lock.json found. Running npm install..."
             npm install
           fi
 
@@ -48,29 +69,34 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
-          # Use GITHUB_RUN_NUMBER to guarantee a continuously rising, unique version code
-          # Example: If your last build was 1083, offset it by 1100 to get 1100 + run_number
+          # Use GITHUB_RUN_NUMBER to guarantee a continuously rising, unique version code.
+          # Since your last reported build was 1083, offset it by 1100 to ensure it's higher.
           VERSION_CODE=$((1100 + GITHUB_RUN_NUMBER))
           echo "Setting Android Version Code to: $VERSION_CODE"
           
           node -e "
             const fs = require('fs');
             const file = 'app.json';
+            if (!fs.existsSync(file)) {
+              console.error('ERROR: app.json not found in ' + process.cwd());
+              process.exit(1);
+            }
             const data = JSON.parse(fs.readFileSync(file, 'utf8'));
             
             if (!data.expo) data.expo = {};
             if (!data.expo.android) data.expo.android = {};
             
-            // Forces the version code to always increase
+            // Forces the version code to always step forward
             data.expo.android.versionCode = $VERSION_CODE;
             
             fs.writeFileSync(file, JSON.stringify(data, null, 2));
+            console.log('Successfully updated app.json with versionCode ' + $VERSION_CODE);
           "
 
       - name: Expo prebuild
         working-directory: ${{ env.PROJECT_DIR }}
         env:
-          # Expo explicitly looks for these env variables to set SDK levels during prebuild
+          # Expo explicitly looks for these environment variables to inject correct target levels during prebuild
           ANDROID_BUILD_TOOLS_VERSION: "36.0.0"
           ANDROID_COMPILE_SDK_VERSION: "36"
           ANDROID_TARGET_SDK_VERSION: "36"
@@ -91,7 +117,7 @@ jobs:
           mkdir -p android/app
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
           if [ ! -s android/app/upload-keystore.jks ]; then
-            echo "ERROR: Keystore was not created"
+            echo "ERROR: Keystore was not created or is empty"
             exit 1
           fi
           echo "Keystore restored successfully"
@@ -125,14 +151,14 @@ jobs:
               if "signingConfig signingConfigs.release" not in text:
                   text = text.replace("buildTypes {", "buildTypes {\n        release {\n            signingConfig signingConfigs.release\n        }", 1)
               path.write_text(text)
-              print("Release signing configured")
+              print("Release signing configured successfully")
           PY
 
       - name: Verify configuration
         working-directory: ${{ env.PROJECT_DIR }}/android
         shell: bash
         run: |
-          echo "=== Final Android configuration ==="
+          echo "=== Final Generated Android Configuration ==="
           grep -nE "compileSdk|targetSdk|versionCode|signingConfig" app/build.gradle || true
 
       - name: Build release AAB

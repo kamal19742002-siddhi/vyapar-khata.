@@ -44,27 +44,5 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Configure Android Signing
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-            echo "ERROR: One or more Android signing secrets are missing."
-            exit 1
-          fi
-
-          mkdir -p ~/.android
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > ~/.android/upload-keystore.jks
-          echo "Keystore saved to ~/.android/upload-keystore.jks"
-
-          mkdir -p android
-          echo "storeFile=~/.android/upload-keystore.jks" > android/key.properties
-          echo "storePassword=$KEYSTORE_PASSWORD" >> android/key.properties
-          echo "keyAlias=$KEY_ALIAS" >> android/key.properties
-          echo "keyPassword=$KEY_PASSWORD" >> android/key.properties
-
       - name: Build Android App Bundle (AAB)
         run: eas build --platform android --profile production --non-interactive

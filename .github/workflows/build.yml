@@ -46,5 +46,4 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           eas init --force --non-interactive
-          eas credentials --platform android --non-interactive || true
-          eas build --platform android --profile production --non-interactive --no-wait
+          eas build --platform android --profile production --non-interactive

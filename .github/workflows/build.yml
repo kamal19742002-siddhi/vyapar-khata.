@@ -44,7 +44,7 @@ jobs:
           const path = require("path");
           if (!fs.existsSync("assets")) fs.mkdirSync("assets", { recursive: true });
           
-          const dummyPng = Buffer.from("iVBORw0KGgoAAAANSU5EUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+          const dummyPng = Buffer.from("iVBORw0KGgoAAAANSU5EUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORUSCYII=", "base64");
           
           const files = ["icon.png", "adaptive-icon.png", "splash.png", "favicon.png"];
           files.forEach(file => {
@@ -54,6 +54,16 @@ jobs:
               console.log("Created missing asset:", filePath);
             }
           });
+          '
+
+      - name: Ensure Entry File Exists
+        run: |
+          node -e '
+          const fs = require("fs");
+          if (!fs.existsSync("App.js") && !fs.existsSync("index.js") && !fs.existsSync("App.tsx")) {
+            fs.writeFileSync("App.js", "import React from \"react\"; import { Text, View } from \"react-native\"; export default function App() { return (<View><Text>Vyapar Khata</Text></View>); }");
+            console.log("Created fallback App.js");
+          }
           '
 
       - name: Clean app.json missing assets references

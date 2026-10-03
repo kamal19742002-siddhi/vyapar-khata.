@@ -11,12 +11,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check repository files
+      - name: Debug - List Files
         run: |
-          echo "=== Current Directory Content ==="
+          echo "Current working directory:"
+          pwd
+          echo "List all files in root:"
           ls -la
-          echo "=== Finding package.json ==="
-          find . -name "package.json"
+          echo "Search for package.json location:"
+          find . -maxdepth 3 -name "package.json"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -42,12 +44,3 @@ jobs:
           echo "========================================"
 
           node -e "const fs=require('fs'); const file='app.json'; const versionCode=$VERSION_CODE; if(!fs.existsSync(file)){console.error('ERROR: app.json not found in ' + process.cwd());process.exit(1);} const data=JSON.parse(fs.readFileSync(file,'utf8')); if(!data.expo)data.expo={}; if(!data.expo.android)data.expo.android={}; data.expo.android.versionCode=versionCode; fs.writeFileSync(file,JSON.stringify(data,null,2)); console.log('SUCCESS: versionCode updated to '+versionCode);"
-
-      - name: Setup EAS CLI
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Build Android App Bundle (AAB)
-        run: eas build --platform android --profile production --non-interactive

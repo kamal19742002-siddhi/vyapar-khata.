@@ -44,7 +44,6 @@ jobs:
           const path = require("path");
           if (!fs.existsSync("assets")) fs.mkdirSync("assets", { recursive: true });
           
-          // 1x1 transparent PNG Base64
           const dummyPng = Buffer.from("iVBORw0KGgoAAAANSU5EUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
           
           const files = ["icon.png", "adaptive-icon.png", "splash.png", "favicon.png"];
@@ -75,7 +74,7 @@ jobs:
           }
           '
 
-      - name: Create / Update eas.json
+      - name: Create / Update eas.json with Java 17 Support
         run: |
           node -e '
           const fs = require("fs");
@@ -84,14 +83,15 @@ jobs:
             build: {
               production: {
                 android: {
-                  buildType: "app-bundle"
+                  buildType: "app-bundle",
+                  image: "latest"
                 },
                 node: "20.18.0"
               }
             }
           };
           fs.writeFileSync("eas.json", JSON.stringify(easConfig, null, 2));
-          console.log("eas.json created successfully!");
+          console.log("eas.json created with image: latest!");
           '
 
       - name: Set versionCode

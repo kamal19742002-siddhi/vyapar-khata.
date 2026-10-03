@@ -1,4 +1,4 @@
-```yaml
+
 name: Build Vyapar Khata AAB
 
 on:
@@ -394,4 +394,4 @@ jobs:
             --profile production \
             --non-interactive \
             --no-wait
-```
+

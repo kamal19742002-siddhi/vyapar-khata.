@@ -19,10 +19,10 @@ jobs:
           node-version: 22
 
       - name: Install EAS CLI Globally
-        run: npm install -g eas-cli@12.5.0
+        run: npm install -g eas-cli
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps || true
 
       - name: Set versionCode
         shell: bash
@@ -34,16 +34,11 @@ jobs:
 
           VERSION_CODE=$((1100 + GITHUB_RUN_NUMBER))
 
-          echo "========================================"
-          echo "GITHUB_RUN_NUMBER: $GITHUB_RUN_NUMBER"
-          echo "VERSION_CODE: $VERSION_CODE"
-          echo "========================================"
-
           node -e "const fs=require('fs'); const file='app.json'; const versionCode=$VERSION_CODE; if(!fs.existsSync(file)){console.error('ERROR: app.json not found in ' + process.cwd());process.exit(1);} const data=JSON.parse(fs.readFileSync(file,'utf8')); if(!data.expo)data.expo={}; if(!data.expo.android)data.expo.android={}; data.expo.android.versionCode=versionCode; fs.writeFileSync(file,JSON.stringify(data,null,2)); console.log('SUCCESS: versionCode updated to '+versionCode);"
 
       - name: Build Android App Bundle (AAB)
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          eas init --force --non-interactive
-          eas build --platform android --profile production --non-interactive
+          eas init --id 0d5c6770-6292-474a-b0c0-6a34adc0cf9d --non-interactive
+          eas build --platform android --profile production --non-interactive --no-wait

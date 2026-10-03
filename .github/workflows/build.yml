@@ -37,45 +37,44 @@ jobs:
           console.log("package.json verified!");
           '
 
-      - name: Create dummy asset files if missing
+      - name: Create valid PNG assets
         run: |
           node -e '
           const fs = require("fs");
           const path = require("path");
           if (!fs.existsSync("assets")) fs.mkdirSync("assets", { recursive: true });
-          
-          const dummyPng = Buffer.from("iVBORw0KGgoAAAANSU5EUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORUSCYII=", "base64");
-          
+
+          // Valid 1x1 transparent PNG Buffer with IHDR
+          const validPng = Buffer.from("iVBORw0KGgoAAAANSU5EUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+
           const files = ["icon.png", "adaptive-icon.png", "splash.png", "favicon.png"];
           files.forEach(file => {
             const filePath = path.join("assets", file);
-            if (!fs.existsSync(filePath)) {
-              fs.writeFileSync(filePath, dummyPng);
-              console.log("Created missing asset:", filePath);
-            }
+            fs.writeFileSync(filePath, validPng);
+            console.log("Created valid PNG asset:", filePath);
           });
           '
 
-      - name: Configure app.json for Android Resources
+      - name: Configure app.json for Android
         run: |
           node -e '
           const fs = require("fs");
           if (fs.existsSync("app.json")) {
             const data = JSON.parse(fs.readFileSync("app.json", "utf8"));
             if (!data.expo) data.expo = {};
+            data.expo.icon = "./assets/icon.png";
             data.expo.splash = {
               image: "./assets/splash.png",
               resizeMode: "contain",
               backgroundColor: "#ffffff"
             };
-            if (!data.expo.icon) data.expo.icon = "./assets/icon.png";
             if (!data.expo.android) data.expo.android = {};
             data.expo.android.adaptiveIcon = {
               foregroundImage: "./assets/adaptive-icon.png",
               backgroundColor: "#ffffff"
             };
             fs.writeFileSync("app.json", JSON.stringify(data, null, 2));
-            console.log("app.json splash & adaptiveIcon properly configured!");
+            console.log("app.json configured with valid assets!");
           }
           '
 

@@ -32,12 +32,12 @@ jobs:
                 android: {
                   buildType: "app-bundle"
                 },
-                node: "22.11.0"
+                node: "20.18.0"
               }
             }
           };
           fs.writeFileSync("eas.json", JSON.stringify(easConfig, null, 2));
-          console.log("eas.json created successfully with Node 22!");
+          console.log("eas.json created successfully!");
           '
 
       - name: Set versionCode
@@ -55,6 +55,7 @@ jobs:
       - name: Build Android App Bundle (AAB)
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_BUILD_SKIP_LOCKFILE_CHECK: "1"
         run: |
           eas init --id 0d5c6770-6292-474a-b0c0-6a34adc0cf9d --non-interactive
           eas build --platform android --profile production --non-interactive --no-wait

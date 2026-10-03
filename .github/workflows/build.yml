@@ -1,3 +1,4 @@
+```yaml
 name: Build Vyapar Khata AAB
 
 on:
@@ -10,85 +11,290 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
 
-      - name: Install EAS CLI Globally
+      - name: Install EAS CLI
         run: npm install -g eas-cli
 
-      - name: Setup package.json and dependencies
+      - name: Setup package.json
+        shell: bash
         run: |
-          node -e '
+          node <<'NODE'
           const fs = require("fs");
+
           let pkg = {};
+
           if (fs.existsSync("package.json")) {
-            pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            pkg = JSON.parse(
+              fs.readFileSync("package.json", "utf8")
+            );
           }
+
+          pkg.name = "vyapar-khata";
+          pkg.version = pkg.version || "1.0.0";
+
           pkg.dependencies = pkg.dependencies || {};
-          pkg.dependencies["expo"] = pkg.dependencies["expo"] || "~51.0.0";
-          pkg.dependencies["react"] = pkg.dependencies["react"] || "18.2.0";
-          pkg.dependencies["react-native"] = pkg.dependencies["react-native"] || "0.74.5";
-          fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
-          console.log("package.json verified!");
-          '
 
-      - name: Ensure Android SplashScreen Color Resource Exists
+          pkg.dependencies.expo = "~51.0.0";
+          pkg.dependencies.react = "18.2.0";
+          pkg.dependencies["react-native"] = "0.74.5";
+
+          fs.writeFileSync(
+            "package.json",
+            JSON.stringify(pkg, null, 2) + "\n"
+          );
+
+          console.log("package.json prepared.");
+          NODE
+
+      - name: Create valid PNG assets
+        shell: bash
         run: |
-          node -e '
+          python3 -m pip install --quiet pillow
+
+          python3 <<'PY'
+          from PIL import Image, ImageDraw
+          from pathlib import Path
+
+          assets = Path("assets")
+          assets.mkdir(parents=True, exist_ok=True)
+
+          def create_png(name, size):
+              img = Image.new(
+                  "RGBA",
+                  size,
+                  (255, 255, 255, 255)
+              )
+
+              draw = ImageDraw.Draw(img)
+
+              w, h = size
+              margin = max(1, min(w, h) // 8)
+
+              draw.rectangle(
+                  [
+                      margin,
+                      margin,
+                      w - margin,
+                      h - margin
+                  ],
+                  fill=(255, 255, 255, 255)
+              )
+
+              img.save(
+                  assets / name,
+                  format="PNG",
+                  optimize=False
+              )
+
+              print(
+                  f"Created valid PNG: {name} {size}"
+              )
+
+          create_png("icon.png", (1024, 1024))
+          create_png("adaptive-icon.png", (1024, 1024))
+          create_png("splash.png", (1284, 2778))
+          create_png("favicon.png", (48, 48))
+          PY
+
+      - name: Verify PNG files
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          from PIL import Image
+
+          files = [
+              "assets/icon.png",
+              "assets/adaptive-icon.png",
+              "assets/splash.png",
+              "assets/favicon.png"
+          ]
+
+          for filename in files:
+
+              path = Path(filename)
+
+              if not path.exists():
+                  raise SystemExit(
+                      f"ERROR: Missing {filename}"
+                  )
+
+              with Image.open(path) as img:
+                  img.verify()
+
+              with Image.open(path) as img:
+                  print(
+                      f"VALID PNG: {filename} -> {img.size}"
+                  )
+
+          print("All PNG files are valid.")
+          PY
+
+      - name: Configure app.json
+        shell: bash
+        run: |
+          node <<'NODE'
           const fs = require("fs");
-          const path = require("path");
-          
-          // Configure app.json with explicit background color for splash
-          if (fs.existsSync("app.json")) {
-            const data = JSON.parse(fs.readFileSync("app.json", "utf8"));
-            if (!data.expo) data.expo = {};
-            data.expo.splash = {
-              backgroundColor: "#ffffff",
-              resizeMode: "contain"
-            };
-            delete data.expo.icon;
-            if (data.expo.android) {
-              delete data.expo.android.adaptiveIcon;
-            }
-            fs.writeFileSync("app.json", JSON.stringify(data, null, 2));
-            console.log("Configured splash backgroundColor in app.json");
+
+          const file = "app.json";
+
+          let data = {};
+
+          if (fs.existsSync(file)) {
+            data = JSON.parse(
+              fs.readFileSync(file, "utf8")
+            );
           }
-          '
 
-      - name: Ensure Entry File Exists
+          data.expo = data.expo || {};
+
+          data.expo.name = "Vyapar Khata Book";
+          data.expo.slug = "vyapar-khata";
+
+          data.expo.icon = "./assets/icon.png";
+
+          data.expo.splash = {
+            image: "./assets/splash.png",
+            resizeMode: "contain",
+            backgroundColor: "#ffffff"
+          };
+
+          data.expo.android =
+            data.expo.android || {};
+
+          /*
+           * IMPORTANT:
+           * This is the existing Google Play app ID.
+           */
+          data.expo.android.package =
+            "com.vyapar.khatabook.free";
+
+          data.expo.android.adaptiveIcon = {
+            foregroundImage:
+              "./assets/adaptive-icon.png",
+            backgroundColor: "#ffffff"
+          };
+
+          fs.writeFileSync(
+            file,
+            JSON.stringify(data, null, 2) + "\n"
+          );
+
+          console.log(
+            "Android package set to:",
+            data.expo.android.package
+          );
+          NODE
+
+      - name: Check Android package
+        shell: bash
         run: |
-          node -e '
+          node <<'NODE'
           const fs = require("fs");
-          if (!fs.existsSync("App.js") && !fs.existsSync("index.js") && !fs.existsSync("App.tsx")) {
-            fs.writeFileSync("App.js", "import React from \"react\"; import { Text, View } from \"react-native\"; export default function App() { return (<View><Text>Vyapar Khata</Text></View>); }");
-            console.log("Created fallback App.js");
+
+          const data = JSON.parse(
+            fs.readFileSync("app.json", "utf8")
+          );
+
+          const pkg =
+            data.expo &&
+            data.expo.android &&
+            data.expo.android.package;
+
+          if (pkg !== "com.vyapar.khatabook.free") {
+            console.error(
+              "ERROR: Wrong Android package:"
+            );
+
+            console.error(pkg);
+            process.exit(1);
           }
-          '
 
-      - name: Create / Update eas.json with Java 17 Support
+          console.log(
+            "SUCCESS: Android package = " + pkg
+          );
+          NODE
+
+      - name: Ensure App.js exists
+        shell: bash
         run: |
-          node -e '
+          if [ ! -f "App.js" ] && \
+             [ ! -f "App.tsx" ] && \
+             [ ! -f "index.js" ]; then
+
+            cat > App.js <<'EOF'
+          import React from "react";
+          import {
+            View,
+            Text
+          } from "react-native";
+
+          export default function App() {
+            return (
+              <View
+                style={{
+                  flex: 1,
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+              >
+                <Text>
+                  Vyapar Khata
+                </Text>
+              </View>
+            );
+          }
+          EOF
+
+            echo "Fallback App.js created."
+
+          else
+            echo "Existing app entry file found."
+          fi
+
+      - name: Create eas.json
+        shell: bash
+        run: |
+          node <<'NODE'
           const fs = require("fs");
-          const easConfig = {
-            cli: { version: ">= 12.0.0" },
+
+          const config = {
+            cli: {
+              version: ">= 12.0.0"
+            },
+
             build: {
               production: {
+                credentialsSource: "remote",
+
                 android: {
                   buildType: "app-bundle",
-                  image: "latest"
+                  image:
+                    "ubuntu-22.04-jdk-17-ndk-r26b"
                 },
+
                 node: "20.18.0"
               }
             }
           };
-          fs.writeFileSync("eas.json", JSON.stringify(easConfig, null, 2));
-          console.log("eas.json created with image: latest!");
-          '
+
+          fs.writeFileSync(
+            "eas.json",
+            JSON.stringify(config, null, 2) + "\n"
+          );
+
+          console.log(
+            "eas.json configured."
+          );
+          NODE
 
       - name: Set versionCode
         shell: bash
@@ -100,12 +306,92 @@ jobs:
 
           VERSION_CODE=$((1100 + GITHUB_RUN_NUMBER))
 
-          node -e "const fs=require('fs'); const file='app.json'; const versionCode=$VERSION_CODE; if(!fs.existsSync(file)){console.error('ERROR: app.json not found in ' + process.cwd());process.exit(1);} const data=JSON.parse(fs.readFileSync(file,'utf8')); if(!data.expo)data.expo={}; if(!data.expo.android)data.expo.android={}; data.expo.android.versionCode=versionCode; fs.writeFileSync(file,JSON.stringify(data,null,2)); console.log('SUCCESS: versionCode updated to '+versionCode);"
+          echo "Version code: $VERSION_CODE"
 
-      - name: Build Android App Bundle (AAB)
+          node <<NODE
+          const fs = require("fs");
+
+          const file = "app.json";
+          const versionCode = $VERSION_CODE;
+
+          const data = JSON.parse(
+            fs.readFileSync(file, "utf8")
+          );
+
+          data.expo = data.expo || {};
+          data.expo.android =
+            data.expo.android || {};
+
+          data.expo.android.versionCode =
+            versionCode;
+
+          fs.writeFileSync(
+            file,
+            JSON.stringify(data, null, 2) + "\n"
+          );
+
+          console.log(
+            "SUCCESS: versionCode = " +
+            versionCode
+          );
+          NODE
+
+      - name: Final configuration check
+        shell: bash
+        run: |
+          echo "========== APP CONFIG =========="
+
+          node <<'NODE'
+          const fs = require("fs");
+
+          const data = JSON.parse(
+            fs.readFileSync("app.json", "utf8")
+          );
+
+          console.log(
+            "App name:",
+            data.expo.name
+          );
+
+          console.log(
+            "Android package:",
+            data.expo.android.package
+          );
+
+          console.log(
+            "Version:",
+            data.expo.version
+          );
+
+          console.log(
+            "Version code:",
+            data.expo.android.versionCode
+          );
+          NODE
+
+          echo ""
+          echo "========== EAS CONFIG =========="
+
+          cat eas.json
+
+          echo ""
+          echo "========== CREDENTIAL SOURCE =========="
+
+          echo "credentialsSource = remote"
+
+      - name: Build Android App Bundle
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EAS_BUILD_SKIP_LOCKFILE_CHECK: "1"
+
         run: |
-          eas init --id 0d5c6770-6292-474a-b0c0-6a34adc0cf9d --non-interactive
-          eas build --platform android --profile production --non-interactive --no-wait
+          eas init \
+            --id 0d5c6770-6292-474a-b0c0-6a34adc0cf9d \
+            --non-interactive
+
+          eas build \
+            --platform android \
+            --profile production \
+            --non-interactive \
+            --no-wait
+```

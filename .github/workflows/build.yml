@@ -21,6 +21,22 @@ jobs:
       - name: Install EAS CLI Globally
         run: npm install -g eas-cli
 
+      - name: Setup package.json and dependencies
+        run: |
+          node -e '
+          const fs = require("fs");
+          let pkg = {};
+          if (fs.existsSync("package.json")) {
+            pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          }
+          pkg.dependencies = pkg.dependencies || {};
+          pkg.dependencies["expo"] = pkg.dependencies["expo"] || "~51.0.0";
+          pkg.dependencies["react"] = pkg.dependencies["react"] || "18.2.0";
+          pkg.dependencies["react-native"] = pkg.dependencies["react-native"] || "0.74.5";
+          fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
+          console.log("package.json verified!");
+          '
+
       - name: Create / Update eas.json
         run: |
           node -e '

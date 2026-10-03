@@ -37,6 +37,44 @@ jobs:
           console.log("package.json verified!");
           '
 
+      - name: Create dummy asset files if missing
+        run: |
+          node -e '
+          const fs = require("fs");
+          const path = require("path");
+          if (!fs.existsSync("assets")) fs.mkdirSync("assets", { recursive: true });
+          
+          // 1x1 transparent PNG Base64
+          const dummyPng = Buffer.from("iVBORw0KGgoAAAANSU5EUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+          
+          const files = ["icon.png", "adaptive-icon.png", "splash.png", "favicon.png"];
+          files.forEach(file => {
+            const filePath = path.join("assets", file);
+            if (!fs.existsSync(filePath)) {
+              fs.writeFileSync(filePath, dummyPng);
+              console.log("Created missing asset:", filePath);
+            }
+          });
+          '
+
+      - name: Clean app.json missing assets references
+        run: |
+          node -e '
+          const fs = require("fs");
+          if (fs.existsSync("app.json")) {
+            const data = JSON.parse(fs.readFileSync("app.json", "utf8"));
+            if (data.expo) {
+              delete data.expo.icon;
+              delete data.expo.splash;
+              if (data.expo.android) {
+                delete data.expo.android.adaptiveIcon;
+              }
+            }
+            fs.writeFileSync("app.json", JSON.stringify(data, null, 2));
+            console.log("Assets references cleared from app.json!");
+          }
+          '
+
       - name: Create / Update eas.json
         run: |
           node -e '

@@ -21,8 +21,24 @@ jobs:
       - name: Install EAS CLI Globally
         run: npm install -g eas-cli
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps || true
+      - name: Create / Update eas.json
+        run: |
+          node -e '
+          const fs = require("fs");
+          const easConfig = {
+            cli: { version: ">= 12.0.0" },
+            build: {
+              production: {
+                android: {
+                  buildType: "app-bundle"
+                },
+                node: "22.11.0"
+              }
+            }
+          };
+          fs.writeFileSync("eas.json", JSON.stringify(easConfig, null, 2));
+          console.log("eas.json created successfully with Node 22!");
+          '
 
       - name: Set versionCode
         shell: bash

@@ -56,6 +56,29 @@ jobs:
           });
           '
 
+      - name: Configure app.json for Android Resources
+        run: |
+          node -e '
+          const fs = require("fs");
+          if (fs.existsSync("app.json")) {
+            const data = JSON.parse(fs.readFileSync("app.json", "utf8"));
+            if (!data.expo) data.expo = {};
+            data.expo.splash = {
+              image: "./assets/splash.png",
+              resizeMode: "contain",
+              backgroundColor: "#ffffff"
+            };
+            if (!data.expo.icon) data.expo.icon = "./assets/icon.png";
+            if (!data.expo.android) data.expo.android = {};
+            data.expo.android.adaptiveIcon = {
+              foregroundImage: "./assets/adaptive-icon.png",
+              backgroundColor: "#ffffff"
+            };
+            fs.writeFileSync("app.json", JSON.stringify(data, null, 2));
+            console.log("app.json splash & adaptiveIcon properly configured!");
+          }
+          '
+
       - name: Ensure Entry File Exists
         run: |
           node -e '
@@ -63,24 +86,6 @@ jobs:
           if (!fs.existsSync("App.js") && !fs.existsSync("index.js") && !fs.existsSync("App.tsx")) {
             fs.writeFileSync("App.js", "import React from \"react\"; import { Text, View } from \"react-native\"; export default function App() { return (<View><Text>Vyapar Khata</Text></View>); }");
             console.log("Created fallback App.js");
-          }
-          '
-
-      - name: Clean app.json missing assets references
-        run: |
-          node -e '
-          const fs = require("fs");
-          if (fs.existsSync("app.json")) {
-            const data = JSON.parse(fs.readFileSync("app.json", "utf8"));
-            if (data.expo) {
-              delete data.expo.icon;
-              delete data.expo.splash;
-              if (data.expo.android) {
-                delete data.expo.android.adaptiveIcon;
-              }
-            }
-            fs.writeFileSync("app.json", JSON.stringify(data, null, 2));
-            console.log("Assets references cleared from app.json!");
           }
           '
 

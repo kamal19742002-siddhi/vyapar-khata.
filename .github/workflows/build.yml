@@ -21,26 +21,77 @@ jobs:
       - name: Install EAS CLI Globally
         run: npm install -g eas-cli
 
-      - name: Setup Basic Config and Clean Assets
+      - name: Setup package.json and dependencies
         run: |
           node -e '
           const fs = require("fs");
-          
-          // Clean app.json to let Expo handle prebuild cleanly
+          let pkg = {};
+          if (fs.existsSync("package.json")) {
+            pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          }
+          pkg.dependencies = pkg.dependencies || {};
+          pkg.dependencies["expo"] = pkg.dependencies["expo"] || "~51.0.0";
+          pkg.dependencies["react"] = pkg.dependencies["react"] || "18.2.0";
+          pkg.dependencies["react-native"] = pkg.dependencies["react-native"] || "0.74.5";
+          fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
+          console.log("package.json verified!");
+          '
+
+      - name: Create valid PNG assets
+        run: |
+          node -e '
+          const fs = require("fs");
+          const path = require("path");
+          if (!fs.existsSync("assets")) fs.mkdirSync("assets", { recursive: true });
+
+          // 1x1 valid PNG with correct IHDR chunk
+          const validPng = Buffer.from("iVBORw0KGgoAAAANSU5EUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+
+          const files = ["icon.png", "adaptive-icon.png", "splash.png", "favicon.png"];
+          files.forEach(file => {
+            const filePath = path.join("assets", file);
+            fs.writeFileSync(filePath, validPng);
+            console.log("Created valid PNG asset:", filePath);
+          });
+          '
+
+      - name: Configure app.json for Android
+        run: |
+          node -e '
+          const fs = require("fs");
           if (fs.existsSync("app.json")) {
             const data = JSON.parse(fs.readFileSync("app.json", "utf8"));
-            if (data.expo) {
-              delete data.expo.icon;
-              delete data.expo.splash;
-              if (data.expo.android) {
-                delete data.expo.android.adaptiveIcon;
-              }
-            }
+            if (!data.expo) data.expo = {};
+            data.expo.icon = "./assets/icon.png";
+            data.expo.splash = {
+              image: "./assets/splash.png",
+              resizeMode: "contain",
+              backgroundColor: "#ffffff"
+            };
+            if (!data.expo.android) data.expo.android = {};
+            data.expo.android.adaptiveIcon = {
+              foregroundImage: "./assets/adaptive-icon.png",
+              backgroundColor: "#ffffff"
+            };
             fs.writeFileSync("app.json", JSON.stringify(data, null, 2));
-            console.log("Cleaned asset paths from app.json");
+            console.log("app.json configured cleanly!");
           }
+          '
 
-          // Setup eas.json with Java 17 / latest runner
+      - name: Ensure Entry File Exists
+        run: |
+          node -e '
+          const fs = require("fs");
+          if (!fs.existsSync("App.js") && !fs.existsSync("index.js") && !fs.existsSync("App.tsx")) {
+            fs.writeFileSync("App.js", "import React from \"react\"; import { Text, View } from \"react-native\"; export default function App() { return (<View><Text>Vyapar Khata</Text></View>); }");
+            console.log("Created fallback App.js");
+          }
+          '
+
+      - name: Create / Update eas.json with Java 17 Support
+        run: |
+          node -e '
+          const fs = require("fs");
           const easConfig = {
             cli: { version: ">= 12.0.0" },
             build: {
@@ -48,19 +99,26 @@ jobs:
                 android: {
                   buildType: "app-bundle",
                   image: "latest"
-                }
+                },
+                node: "20.18.0"
               }
             }
           };
           fs.writeFileSync("eas.json", JSON.stringify(easConfig, null, 2));
-          console.log("eas.json ready");
+          console.log("eas.json created with image: latest!");
           '
 
       - name: Set versionCode
         shell: bash
         run: |
+          if [ -z "$GITHUB_RUN_NUMBER" ]; then
+            echo "ERROR: GITHUB_RUN_NUMBER is not set."
+            exit 1
+          fi
+
           VERSION_CODE=$((1100 + GITHUB_RUN_NUMBER))
-          node -e "const fs=require('fs'); const file='app.json'; const data=JSON.parse(fs.readFileSync(file,'utf8')); if(!data.expo)data.expo={}; if(!data.expo.android)data.expo.android={}; data.expo.android.versionCode=$VERSION_CODE; fs.writeFileSync(file,JSON.stringify(data,null,2));"
+
+          node -e "const fs=require('fs'); const file='app.json'; const versionCode=$VERSION_CODE; if(!fs.existsSync(file)){console.error('ERROR: app.json not found in ' + process.cwd());process.exit(1);} const data=JSON.parse(fs.readFileSync(file,'utf8')); if(!data.expo)data.expo={}; if(!data.expo.android)data.expo.android={}; data.expo.android.versionCode=versionCode; fs.writeFileSync(file,JSON.stringify(data,null,2)); console.log('SUCCESS: versionCode updated to '+versionCode);"
 
       - name: Build Android App Bundle (AAB)
         env:

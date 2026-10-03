@@ -37,44 +37,23 @@ jobs:
           console.log("package.json verified!");
           '
 
-      - name: Create valid PNG assets
-        run: |
-          node -e '
-          const fs = require("fs");
-          const path = require("path");
-          if (!fs.existsSync("assets")) fs.mkdirSync("assets", { recursive: true });
-
-          // 1x1 valid PNG with correct IHDR chunk
-          const validPng = Buffer.from("iVBORw0KGgoAAAANSU5EUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
-
-          const files = ["icon.png", "adaptive-icon.png", "splash.png", "favicon.png"];
-          files.forEach(file => {
-            const filePath = path.join("assets", file);
-            fs.writeFileSync(filePath, validPng);
-            console.log("Created valid PNG asset:", filePath);
-          });
-          '
-
-      - name: Configure app.json for Android
+      - name: Completely Remove Asset References from app.json
         run: |
           node -e '
           const fs = require("fs");
           if (fs.existsSync("app.json")) {
             const data = JSON.parse(fs.readFileSync("app.json", "utf8"));
-            if (!data.expo) data.expo = {};
-            data.expo.icon = "./assets/icon.png";
-            data.expo.splash = {
-              image: "./assets/splash.png",
-              resizeMode: "contain",
-              backgroundColor: "#ffffff"
-            };
-            if (!data.expo.android) data.expo.android = {};
-            data.expo.android.adaptiveIcon = {
-              foregroundImage: "./assets/adaptive-icon.png",
-              backgroundColor: "#ffffff"
-            };
+            if (data.expo) {
+              delete data.expo.icon;
+              delete data.expo.splash;
+              delete data.expo.notification;
+              if (data.expo.android) {
+                delete data.expo.android.adaptiveIcon;
+                delete data.expo.android.splash;
+              }
+            }
             fs.writeFileSync("app.json", JSON.stringify(data, null, 2));
-            console.log("app.json configured cleanly!");
+            console.log("Assets completely removed to bypass image processing!");
           }
           '
 

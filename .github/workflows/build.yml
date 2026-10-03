@@ -1,195 +1,43 @@
-name: Build Vyapar Khata AAB
-on:
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: "temurin"
-          java-version: "17"
-
-      - name: Locate project
-        id: locate
+      - name: Set versionCode
+        working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
-          echo "=== Searching for package.json ==="
-          # Locate package.json while safely ignoring node_modules and .git folders
-          PKG_PATH=$(find . -type f -name "package.json" ! -path "*/node_modules/*" ! -path "*/.git/*" | head -n 1)
-          
-          if [ -z "$PKG_PATH" ]; then
-            echo "ERROR: package.json not found anywhere in the repository!"
-            echo "=== Current Directory Contents ==="
-            ls -la
-            echo "=== Full Directory Tree (Max Depth 2) ==="
-            find . -maxdepth 2 -not -path '*/.*'
+          if [ -z "$GITHUB_RUN_NUMBER" ]; then
+            echo "ERROR: GITHUB_RUN_NUMBER is not set."
             exit 1
           fi
-          
-          # Clean up the path format (removes leading ./)
-          PKG_PATH=$(echo "$PKG_PATH" | sed 's|^\./||')
-          RELATIVE_DIR=$(dirname "$PKG_PATH")
-          
-          # Convert relative path cleanly to absolute path for reliability across steps
-          if [ "$RELATIVE_DIR" = "." ]; then
-            PROJECT_DIR="$GITHUB_WORKSPACE"
-          else
-            PROJECT_DIR="$GITHUB_WORKSPACE/$RELATIVE_DIR"
-          fi
-          
-          echo "Found package.json at: $PKG_PATH"
-          echo "Project Directory set to: $PROJECT_DIR"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Install dependencies
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
-        run: |
-          if [ -f package-lock.json ]; then
-            echo "package-lock.json found. Running npm ci..."
-            npm ci
-          else
-            echo "No package-lock.json found. Running npm install..."
-            npm install
-          fi
-
-      # Dynamic versioning & SDK update via Expo Config before prebuild
-      - name: Inject Version and Target SDK into app.json
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
-        run: |
-          # Use GITHUB_RUN_NUMBER to guarantee a continuously rising, unique version code.
-          # Since your last reported build was 1083, offset it by 1100 to ensure it's higher.
           VERSION_CODE=$((1100 + GITHUB_RUN_NUMBER))
-          echo "Setting Android Version Code to: $VERSION_CODE"
-          
+
+          echo "GITHUB_RUN_NUMBER = $GITHUB_RUN_NUMBER"
+          echo "VERSION_CODE = $VERSION_CODE"
+
           node -e "
             const fs = require('fs');
             const file = 'app.json';
+            const versionCode = Number('$VERSION_CODE');
+
             if (!fs.existsSync(file)) {
-              console.error('ERROR: app.json not found in ' + process.cwd());
+              console.error('ERROR: app.json not found');
               process.exit(1);
             }
-            const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-            
+
+            const data = JSON.parse(
+              fs.readFileSync(file, 'utf8')
+            );
+
             if (!data.expo) data.expo = {};
             if (!data.expo.android) data.expo.android = {};
-            
-            // Forces the version code to always step forward
-            data.expo.android.versionCode = $VERSION_CODE;
-            
-            fs.writeFileSync(file, JSON.stringify(data, null, 2));
-            console.log('Successfully updated app.json with versionCode ' + $VERSION_CODE);
+
+            data.expo.android.versionCode = versionCode;
+
+            fs.writeFileSync(
+              file,
+              JSON.stringify(data, null, 2)
+            );
+
+            console.log(
+              'SUCCESS: app.json versionCode = ' +
+              versionCode
+            );
           "
-
-      - name: Expo prebuild
-        working-directory: ${{ env.PROJECT_DIR }}
-        env:
-          # Expo explicitly looks for these environment variables to inject correct target levels during prebuild
-          ANDROID_BUILD_TOOLS_VERSION: "36.0.0"
-          ANDROID_COMPILE_SDK_VERSION: "36"
-          ANDROID_TARGET_SDK_VERSION: "36"
-        shell: bash
-        run: |
-          npx expo prebuild --platform android --no-install
-
-      - name: Restore upload keystore
-        working-directory: ${{ env.PROJECT_DIR }}
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        shell: bash
-        run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "ERROR: KEYSTORE_BASE64 secret is missing"
-            exit 1
-          fi
-          mkdir -p android/app
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
-          if [ ! -s android/app/upload-keystore.jks ]; then
-            echo "ERROR: Keystore was not created or is empty"
-            exit 1
-          fi
-          echo "Keystore restored successfully"
-
-      # Robust pattern matching logic using Node.js instead of precise character string scanning
-      - name: Configure release signing
-        working-directory: ${{ env.PROJECT_DIR }}/android
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        shell: bash
-        run: |
-          node -e "
-            const fs = require('fs');
-            const file = 'app/build.gradle';
-            if (!fs.existsSync(file)) {
-              console.error('ERROR: app/build.gradle not found!');
-              process.exit(1);
-            }
-            let content = fs.readFileSync(file, 'utf8');
-            
-            if (!content.includes('upload-keystore.jks')) {
-              const signingBlock = '\n    signingConfigs {\n        release {\n            storeFile file(\"upload-keystore.jks\")\n            storePassword System.getenv(\"KEYSTORE_PASSWORD\")\n            keyAlias System.getenv(\"KEY_ALIAS\")\n            keyPassword System.getenv(\"KEY_PASSWORD\")\n        }\n    }\n';
-              
-              // This RegExp pattern matches 'android {' regardless of spacing or dynamic layout style updates
-              content = content.replace(/android\s*\{/, 'android {' + signingBlock);
-              content = content.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release');
-              
-              if (!content.includes('signingConfig signingConfigs.release')) {
-                content = content.replace(/buildTypes\s*\{/, 'buildTypes {\n        release {\n            signingConfig signingConfigs.release\n        }');
-              }
-              
-              fs.writeFileSync(file, content, 'utf8');
-              console.log('Release signing configuration successfully written via RegExp matching.');
-            }
-          "
-
-      - name: Verify configuration
-        working-directory: ${{ env.PROJECT_DIR }}/android
-        shell: bash
-        run: |
-          echo "=== Final Generated Android Configuration ==="
-          grep -nE "compileSdk|targetSdk|versionCode|signingConfig" app/build.gradle || true
-
-      - name: Build release AAB
-        working-directory: ${{ env.PROJECT_DIR }}/android
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        shell: bash
-        run: |
-          chmod +x gradlew
-          ./gradlew clean
-          ./gradlew bundleRelease --no-daemon
-
-      - name: Find AAB
-        shell: bash
-        run: |
-          AAB=$(find . -type f -name "*.aab" | head -n 1)
-          if [ -z "$AAB" ]; then
-            echo "ERROR: AAB was not generated"
-            exit 1
-          fi
-          echo "AAB FOUND: $AAB"
-          echo "AAB_PATH=$AAB" >> "$GITHUB_ENV"
-
-      - name: Upload AAB
-        uses: actions/upload-artifact@v4
-        with:
-          name: vyapar-khata-aab
-          path: ${{ env.AAB_PATH }}
-          if-no-files-found: error
-          retention-days: 7

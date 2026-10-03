@@ -1,43 +1,51 @@
-      - name: Set versionCode
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
-        run: |
-          if [ -z "$GITHUB_RUN_NUMBER" ]; then
-            echo "ERROR: GITHUB_RUN_NUMBER is not set."
-            exit 1
-          fi
+run: |
+  # Check if GITHUB_RUN_NUMBER is available
+  if [ -z "$GITHUB_RUN_NUMBER" ]; then
+    echo "ERROR: GITHUB_RUN_NUMBER is not set."
+    exit 1
+  fi
 
-          VERSION_CODE=$((1100 + GITHUB_RUN_NUMBER))
+  VERSION_CODE=$((1100 + GITHUB_RUN_NUMBER))
+  export VERSION_CODE
 
-          echo "GITHUB_RUN_NUMBER = $GITHUB_RUN_NUMBER"
-          echo "VERSION_CODE = $VERSION_CODE"
+  echo "========================================"
+  echo "Version Code: $VERSION_CODE"
+  echo "========================================"
 
-          node -e "
-            const fs = require('fs');
-            const file = 'app.json';
-            const versionCode = Number('$VERSION_CODE');
+  node <<'NODE'
+  const fs = require("fs");
 
-            if (!fs.existsSync(file)) {
-              console.error('ERROR: app.json not found');
-              process.exit(1);
-            }
+  const file = "app.json";
 
-            const data = JSON.parse(
-              fs.readFileSync(file, 'utf8')
-            );
+  // 1. Check if app.json exists
+  if (!fs.existsSync(file)) {
+    console.error("ERROR: app.json not found in the root directory");
+    process.exit(1);
+  }
 
-            if (!data.expo) data.expo = {};
-            if (!data.expo.android) data.expo.android = {};
+  // 2. Validate process.env.VERSION_CODE
+  const envVersion = process.env.VERSION_CODE;
+  if (!envVersion || isNaN(Number(envVersion))) {
+    console.error("ERROR: Invalid process.env.VERSION_CODE (" + envVersion + ")");
+    process.exit(1);
+  }
 
-            data.expo.android.versionCode = versionCode;
+  // 3. Read and parse JSON safely
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (err) {
+    console.error("ERROR: Failed to parse app.json as valid JSON:", err.message);
+    process.exit(1);
+  }
 
-            fs.writeFileSync(
-              file,
-              JSON.stringify(data, null, 2)
-            );
+  // 4. Ensure structure exists
+  if (!data.expo) data.expo = {};
+  if (!data.expo.android) data.expo.android = {};
 
-            console.log(
-              'SUCCESS: app.json versionCode = ' +
-              versionCode
-            );
-          "
+  // 5. Update and write back
+  data.expo.android.versionCode = Number(envVersion);
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+
+  console.log("SUCCESS: app.json versionCode updated to " + data.expo.android.versionCode);
+  NODE

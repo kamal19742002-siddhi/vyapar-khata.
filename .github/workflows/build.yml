@@ -44,4 +44,6 @@ jobs:
       - name: Build Android App Bundle (AAB)
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas build --platform android --profile production --non-interactive
+        run: |
+          eas init --force --non-interactive
+          eas build --platform android --profile production --non-interactive

@@ -382,7 +382,8 @@ jobs:
           print("Release signing configured.")
           PY
 
-           - name: Verify signing certificate
+         
+      - name: Verify signing certificate
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -392,9 +393,7 @@ jobs:
             -keystore android/app/upload-keystore.jks \
             -storepass "$KEYSTORE_PASSWORD" \
             -alias "$KEY_ALIAS"
-            
-              "Alias name|SHA1:|SHA-256:" \
-              || true
+
 
       - name: Build Android AAB
         env:

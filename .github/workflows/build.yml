@@ -11,19 +11,18 @@ jobs:
     steps:
 
       # --------------------------------------------------
-      # 1. Checkout repository
+      # 1. Checkout
       # --------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
       # --------------------------------------------------
-      # 2. Node.js
+      # 2. Node
       # --------------------------------------------------
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
 
       # --------------------------------------------------
       # 3. Java 17
@@ -35,41 +34,46 @@ jobs:
           java-version: "17"
 
       # --------------------------------------------------
-      # 4. Check project
+      # 4. Check files
       # --------------------------------------------------
-      - name: Check project files
+      - name: Check project
         shell: bash
         run: |
-          echo "===== PROJECT FILES ====="
+          echo "===== PROJECT ====="
           ls -la
-          echo "========================="
+          echo "==================="
 
           test -f package.json || {
-            echo "ERROR: package.json not found"
+            echo "ERROR: package.json missing"
             exit 1
           }
 
           test -f App.js || {
-            echo "ERROR: App.js not found"
+            echo "ERROR: App.js missing"
             exit 1
           }
 
       # --------------------------------------------------
-      # 5. Install Expo + React + required packages
+      # 5. Install dependencies
       # --------------------------------------------------
-      - name: Install project dependencies
+      - name: Install dependencies
         shell: bash
         run: |
-          npm install
+          npm install --legacy-peer-deps
 
           npm install \
             expo@51.0.39 \
             react@18.2.0 \
             react-native@0.74.5 \
-            @react-native-async-storage/async-storage
+            @react-native-async-storage/async-storage \
+            --legacy-peer-deps
+
+          npm install --save-dev \
+            babel-preset-expo@11.0.10 \
+            --legacy-peer-deps
 
       # --------------------------------------------------
-      # 6. Create Babel configuration
+      # 6. Babel
       # --------------------------------------------------
       - name: Configure Babel
         shell: bash
@@ -84,12 +88,10 @@ jobs:
           };
           EOF
 
-          npm install --save-dev babel-preset-expo@11.0.10
-
       # --------------------------------------------------
-      # 7. Create Expo entry file
+      # 7. Expo entry
       # --------------------------------------------------
-      - name: Create index.js
+      - name: Configure entry
         shell: bash
         run: |
           cat > index.js <<'EOF'
@@ -100,9 +102,9 @@ jobs:
           EOF
 
       # --------------------------------------------------
-      # 8. Configure package.json + app.json
+      # 8. Configure package + app
       # --------------------------------------------------
-      - name: Configure Expo Android
+      - name: Configure Expo
         env:
           RUN_NUMBER: ${{ github.run_number }}
         shell: bash
@@ -110,35 +112,31 @@ jobs:
           node <<'NODE'
           const fs = require("fs");
 
-          const run = parseInt(process.env.RUN_NUMBER || "1", 10);
-
-          // ----------------------------------------------
-          // package.json
-          // ----------------------------------------------
-          const pkg = JSON.parse(
-            fs.readFileSync("package.json", "utf8")
+          const run = parseInt(
+            process.env.RUN_NUMBER || "1",
+            10
           );
 
-          pkg.main = "index.js";
+          const packageJson =
+            JSON.parse(
+              fs.readFileSync("package.json", "utf8")
+            );
+
+          packageJson.main = "index.js";
 
           fs.writeFileSync(
             "package.json",
-            JSON.stringify(pkg, null, 2)
+            JSON.stringify(packageJson, null, 2)
           );
 
-          // ----------------------------------------------
-          // app.json
-          // ----------------------------------------------
-          let app;
+          let app = {
+            expo: {}
+          };
 
           if (fs.existsSync("app.json")) {
             app = JSON.parse(
               fs.readFileSync("app.json", "utf8")
             );
-          } else {
-            app = {
-              expo: {}
-            };
           }
 
           app.expo = app.expo || {};
@@ -146,14 +144,11 @@ jobs:
           app.expo.name = "Vyapar Khata";
           app.expo.slug = "vyapar-khata";
           app.expo.version = `2.0.${run}`;
-
           app.expo.orientation = "portrait";
 
           app.expo.android = {
             ...(app.expo.android || {}),
             package: "com.vyapar.khatabook.free",
-
-            // Always higher than previous Play versions
             versionCode: 2000 + run
           };
 
@@ -163,41 +158,46 @@ jobs:
           );
 
           console.log(
-            "Android versionCode =",
+            "VERSION:",
+            `2.0.${run}`
+          );
+
+          console.log(
+            "VERSION CODE:",
             2000 + run
           );
           NODE
 
       # --------------------------------------------------
-      # 9. Verify Expo configuration
+      # 9. Verify Expo
       # --------------------------------------------------
-      - name: Verify Expo
+      - name: Verify Expo configuration
         shell: bash
         run: |
           npx expo --version
           npx expo config --type public
 
       # --------------------------------------------------
-      # 10. Generate Android project
+      # 10. Prebuild Android
       # --------------------------------------------------
-      - name: Prebuild Android
+      - name: Generate Android project
         shell: bash
         run: |
           rm -rf android
 
           npx expo prebuild \
             --platform android \
-            --no-install \
-            --clean
+            --clean \
+            --no-install
 
       # --------------------------------------------------
-      # 11. Force API 36
+      # 11. Configure Android SDK 36
       # --------------------------------------------------
-      - name: Configure Android API 36
+      - name: Configure Android SDK 36
         shell: bash
         run: |
           test -f android/app/build.gradle || {
-            echo "ERROR: android/app/build.gradle not found"
+            echo "ERROR: android/app/build.gradle missing"
             exit 1
           }
 
@@ -234,13 +234,21 @@ jobs:
 
           p.write_text(text)
 
-          print("Android API 36 configured")
+          print("Android SDK 36 configured")
           PY
 
-          echo "android.suppressUnsupportedCompileSdk=36" \
+          touch android/gradle.properties
+
+          grep -q \
+            "android.suppressUnsupportedCompileSdk=36" \
+            android/gradle.properties || \
+            echo "android.suppressUnsupportedCompileSdk=36" \
             >> android/gradle.properties
 
-          echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" \
+          grep -q \
+            "org.gradle.jvmargs" \
+            android/gradle.properties || \
+            echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" \
             >> android/gradle.properties
 
       # --------------------------------------------------
@@ -252,21 +260,22 @@ jobs:
         shell: bash
         run: |
           test -n "$KEYSTORE_BASE64" || {
-            echo "ERROR: KEYSTORE_BASE64 secret is missing"
+            echo "ERROR: KEYSTORE_BASE64 secret missing"
             exit 1
           }
 
           mkdir -p android/app
 
-          echo "$KEYSTORE_BASE64" | base64 --decode \
-            > android/app/upload-keystore.jks
+          printf '%s' "$KEYSTORE_BASE64" |
+            base64 --decode >
+            android/app/upload-keystore.jks
 
           test -s android/app/upload-keystore.jks || {
-            echo "ERROR: Keystore file is empty"
+            echo "ERROR: Keystore is empty"
             exit 1
           }
 
-          echo "Keystore restored successfully"
+          echo "Upload keystore restored"
 
       # --------------------------------------------------
       # 13. Configure release signing
@@ -299,9 +308,11 @@ jobs:
           p = Path("android/app/build.gradle")
           text = p.read_text()
 
-          # Remove accidental duplicate upload signing block
-          if "upload-keystore.jks" not in text:
-              signing_block = """
+          # Add release signing configuration
+          if "storeFile file('upload-keystore.jks')" not in text:
+              marker = "signingConfigs {"
+
+              release_block = """
                   release {
                       storeFile file('upload-keystore.jks')
                       storePassword System.getenv('KEYSTORE_PASSWORD')
@@ -310,12 +321,10 @@ jobs:
                   }
               """
 
-              marker = "signingConfigs {"
-
               if marker in text:
                   text = text.replace(
                       marker,
-                      marker + signing_block,
+                      marker + release_block,
                       1
                   )
               else:
@@ -323,7 +332,7 @@ jobs:
                       "ERROR: signingConfigs block not found"
                   )
 
-          # Release must use upload keystore
+          # Make release use upload key
           text = text.replace(
               "signingConfig signingConfigs.debug",
               "signingConfig signingConfigs.release"
@@ -335,25 +344,41 @@ jobs:
           PY
 
       # --------------------------------------------------
-      # 14. Verify signing configuration
+      # 14. Verify upload certificate
       # --------------------------------------------------
-      - name: Verify keystore
+      - name: Verify upload certificate
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         shell: bash
         run: |
-          keytool -list \
-            -v \
+          echo "===== UPLOAD CERTIFICATE ====="
+
+          keytool -list -v \
             -keystore android/app/upload-keystore.jks \
             -storepass "$KEYSTORE_PASSWORD" \
             -alias "$KEY_ALIAS" \
-            | grep -E "Alias name|SHA1|SHA-256" || true
+            | grep -E \
+              "Alias name|Entry type|SHA1:|SHA-256:" \
+              || true
+
+          echo "=============================="
 
       # --------------------------------------------------
-      # 15. Build Release AAB
+      # 15. Check Gradle
       # --------------------------------------------------
-      - name: Build Android AAB
+      - name: Check Gradle
+        shell: bash
+        run: |
+          cd android
+          chmod +x gradlew
+
+          ./gradlew --version
+
+      # --------------------------------------------------
+      # 16. Build AAB
+      # --------------------------------------------------
+      - name: Build Android Release AAB
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -365,17 +390,19 @@ jobs:
 
           chmod +x gradlew
 
-          ./gradlew clean bundleRelease \
+          ./gradlew \
+            bundleRelease \
             --no-daemon \
-            --stacktrace
+            --stacktrace \
+            --warning-mode all
 
       # --------------------------------------------------
-      # 16. Find AAB
+      # 17. Find AAB
       # --------------------------------------------------
-      - name: Find AAB
+      - name: Find generated AAB
         shell: bash
         run: |
-          echo "===== SEARCHING FOR AAB ====="
+          echo "===== AAB FILES ====="
 
           find android \
             -type f \
@@ -387,16 +414,16 @@ jobs:
             -name "*.aab" \
             | head -n 1)
 
-          test -n "$AAB" || {
-            echo "ERROR: AAB was not generated"
+          if [ -z "$AAB" ]; then
+            echo "ERROR: AAB was NOT generated"
             exit 1
-          }
+          fi
 
           echo "AAB FOUND:"
           echo "$AAB"
 
       # --------------------------------------------------
-      # 17. Upload AAB artifact
+      # 18. Upload AAB artifact
       # --------------------------------------------------
       - name: Upload AAB
         uses: actions/upload-artifact@v4

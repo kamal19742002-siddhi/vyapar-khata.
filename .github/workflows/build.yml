@@ -2,9 +2,6 @@
 name: Build Vyapar Khata AAB
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
@@ -12,8 +9,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -21,275 +17,147 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install EAS CLI
-        run: npm install -g eas-cli
-
-      - name: Prepare package.json
+      - name: Check project files
         shell: bash
         run: |
-          node <<'NODE'
-          const fs = require("fs");
-
-          let pkg = {};
-
-          if (fs.existsSync("package.json")) {
-            pkg = JSON.parse(
-              fs.readFileSync("package.json", "utf8")
-            );
-          }
-
-          pkg.name = "vyapar-khata";
-          pkg.version = "1.0.0";
-
-          pkg.dependencies = pkg.dependencies || {};
-
-          pkg.dependencies.expo = "~51.0.0";
-          pkg.dependencies.react = "18.2.0";
-          pkg.dependencies["react-native"] = "0.74.5";
-
-          fs.writeFileSync(
-            "package.json",
-            JSON.stringify(pkg, null, 2) + "\n"
-          );
-
-          console.log("package.json prepared.");
-          NODE
+          echo "===== PROJECT FILES ====="
+          ls -la
+          echo "===== APP FILE ====="
+          test -f App.js && echo "App.js found" || echo "ERROR: App.js missing"
+          echo "===== PACKAGE ====="
+          test -f package.json && cat package.json || exit 1
+          echo "===== APP CONFIG ====="
+          if [ -f app.json ]; then
+            cat app.json
+          elif [ -f app.config.js ]; then
+            cat app.config.js
+          else
+            echo "ERROR: app.json/app.config.js missing"
+            exit 1
+          fi
 
       - name: Install dependencies
-        run: npm install
-
-      - name: Create valid PNG assets
         shell: bash
         run: |
-          python3 -m pip install --quiet pillow
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
-          python3 <<'PY'
-          from PIL import Image
-          from pathlib import Path
-
-          assets = Path("assets")
-          assets.mkdir(parents=True, exist_ok=True)
-
-          def create_png(name, size):
-              img = Image.new(
-                  "RGBA",
-                  size,
-                  (255, 255, 255, 255)
-              )
-
-              img.save(
-                  assets / name,
-                  format="PNG"
-              )
-
-              print(f"Created: {name} {size}")
-
-          create_png("icon.png", (1024, 1024))
-          create_png("adaptive-icon.png", (1024, 1024))
-          create_png("splash.png", (1284, 2778))
-          create_png("favicon.png", (48, 48))
-          PY
-
-      - name: Configure app.json
+      - name: Install Expo and EAS CLI
         shell: bash
         run: |
-          node <<'NODE'
-          const fs = require("fs");
+          npx expo --version
+          npm install --global eas-cli
+          eas --version
 
-          const file = "app.json";
-
-          let data = {};
-
-          if (fs.existsSync(file)) {
-            data = JSON.parse(
-              fs.readFileSync(file, "utf8")
-            );
-          }
-
-          data.expo = data.expo || {};
-
-          data.expo.name = "Vyapar Khata";
-          data.expo.slug = "vyapar-khata";
-          data.expo.version = "1.0.0";
-
-          data.expo.orientation = "portrait";
-          data.expo.userInterfaceStyle = "light";
-
-          data.expo.icon = "./assets/icon.png";
-
-          data.expo.splash = {
-            image: "./assets/splash.png",
-            resizeMode: "contain",
-            backgroundColor: "#ffffff"
-          };
-
-          data.expo.android =
-            data.expo.android || {};
-
-          data.expo.android.package =
-            "com.vyapar.khatabook.free";
-
-          data.expo.android.adaptiveIcon = {
-            foregroundImage:
-              "./assets/adaptive-icon.png",
-            backgroundColor: "#ffffff"
-          };
-
-          data.expo.web = {
-            favicon: "./assets/favicon.png"
-          };
-
-          fs.writeFileSync(
-            file,
-            JSON.stringify(data, null, 2) + "\n"
-          );
-
-          console.log(
-            "Package:",
-            data.expo.android.package
-          );
-          NODE
-
-      - name: Verify Android package
+      - name: Create EAS configuration
         shell: bash
         run: |
-          node <<'NODE'
-          const fs = require("fs");
-
-          const data = JSON.parse(
-            fs.readFileSync("app.json", "utf8")
-          );
-
-          const pkg =
-            data.expo.android.package;
-
-          if (
-            pkg !==
-            "com.vyapar.khatabook.free"
-          ) {
-            console.error(
-              "Wrong Android package:",
-              pkg
-            );
-
-            process.exit(1);
-          }
-
-          console.log(
-            "Correct package:",
-            pkg
-          );
-          NODE
-
-      - name: Set unique versionCode
-        shell: bash
-        run: |
-          VERSION_CODE=$((1100 + GITHUB_RUN_NUMBER))
-
-          echo "VERSION_CODE=$VERSION_CODE"
-
-          node <<NODE
-          const fs = require("fs");
-
-          const file = "app.json";
-          const data = JSON.parse(
-            fs.readFileSync(file, "utf8")
-          );
-
-          data.expo.android.versionCode =
-            $VERSION_CODE;
-
-          fs.writeFileSync(
-            file,
-            JSON.stringify(data, null, 2) + "\n"
-          );
-
-          console.log(
-            "versionCode:",
-            $VERSION_CODE
-          );
-          NODE
-
-      - name: Create eas.json
-        shell: bash
-        run: |
-          node <<'NODE'
-          const fs = require("fs");
-
-          const eas = {
-            cli: {
-              version: ">= 12.0.0"
-            },
-            build: {
-              production: {
-                credentialsSource: "remote",
-                android: {
-                  buildType: "app-bundle"
+          cat > eas.json <<'EOF'
+          {
+            "build": {
+              "production": {
+                "distribution": "store",
+                "android": {
+                  "buildType": "app-bundle"
                 },
-                node: "20.18.0"
+                "autoIncrement": true
               }
             }
-          };
+          }
+          EOF
 
-          fs.writeFileSync(
-            "eas.json",
-            JSON.stringify(eas, null, 2) + "\n"
-          );
+          echo "===== eas.json ====="
+          cat eas.json
 
-          console.log("eas.json created.");
-          NODE
-
-      - name: Check final configuration
+      - name: Check Expo project
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         shell: bash
         run: |
-          echo "========== FINAL CONFIGURATION =========="
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "ERROR: EXPO_TOKEN GitHub Secret is missing."
+            exit 1
+          fi
 
-          node <<'NODE'
-          const fs = require("fs");
+          npx expo config --type public
 
-          const app = JSON.parse(
-            fs.readFileSync("app.json", "utf8")
-          );
+      - name: Check JavaScript syntax
+        shell: bash
+        run: |
+          echo "Checking App.js syntax..."
 
-          console.log("App name:");
-          console.log(app.expo.name);
+          node --check App.js
 
-          console.log("Package:");
-          console.log(app.expo.android.package);
-
-          console.log("Version:");
-          console.log(app.expo.version);
-
-          console.log("Version code:");
-          console.log(app.expo.android.versionCode);
-          NODE
-
-          echo ""
-          echo "========== EAS CONFIGURATION =========="
-
-          cat eas.json
+          echo "JavaScript syntax check passed."
 
       - name: Build Android App Bundle
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          EAS_BUILD_SKIP_LOCKFILE_CHECK: "1"
-
+        shell: bash
         run: |
-          eas init \
-            --id 0d5c6770-6292-474a-b0c0-6a34adc0cf9d \
-            --non-interactive
+          set -e
+
+          echo "Starting EAS Android production AAB build..."
 
           eas build \
             --platform android \
             --profile production \
-            --non-interactive
+            --non-interactive \
+            --wait \
+            --json > eas-build-result.json
 
-      - name: Save build information
-        if: always()
+          echo "===== EAS BUILD RESULT ====="
+          cat eas-build-result.json
+
+      - name: Download AAB
+        shell: bash
+        run: |
+          set -e
+
+          BUILD_URL=$(node -e "
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('eas-build-result.json','utf8'));
+          const url=x.artifacts && x.artifacts.buildUrl;
+          if(!url) process.exit(2);
+          console.log(url);
+          ")
+
+          echo "AAB URL:"
+          echo "$BUILD_URL"
+
+          curl -L "$BUILD_URL" -o vyapar-khata-release.aab
+
+          echo "===== AAB FILE ====="
+          ls -lh vyapar-khata-release.aab
+
+          FILE_SIZE=$(stat -c%s vyapar-khata-release.aab)
+
+          if [ "$FILE_SIZE" -lt 1000000 ]; then
+            echo "ERROR: Downloaded AAB looks invalid."
+            exit 1
+          fi
+
+          echo "AAB downloaded successfully."
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vyapar-khata-aab
+          path: vyapar-khata-release.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Build summary
+        shell: bash
         run: |
           echo "======================================"
-          echo "EAS ANDROID AAB BUILD FINISHED"
+          echo "       VYAPAR KHATA AAB READY"
           echo "======================================"
-          echo "Open the EAS build URL shown above."
-          echo "The completed Android App Bundle (.aab)"
-          echo "will be available from the EAS build."
+          ls -lh vyapar-khata-release.aab
+          echo ""
+          echo "GitHub Actions -> Artifacts"
+          echo "Download: vyapar-khata-aab"
+          echo "======================================"

@@ -9,318 +9,399 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+
+      # --------------------------------------------------
+      # 1. Checkout repository
+      # --------------------------------------------------
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      # --------------------------------------------------
+      # 2. Node.js
+      # --------------------------------------------------
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
 
-      - name: Install dependencies
+      # --------------------------------------------------
+      # 3. Java 17
+      # --------------------------------------------------
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # --------------------------------------------------
+      # 4. Check project
+      # --------------------------------------------------
+      - name: Check project files
         shell: bash
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+          echo "===== PROJECT FILES ====="
+          ls -la
+          echo "========================="
 
-      - name: Install EAS CLI
-        shell: bash
-        run: |
-          npm install -g eas-cli
-          eas --version
-
-      - name: Prepare app.json
-        shell: bash
-        run: |
-          node <<'NODE'
-          const fs = require("fs");
-
-          const file = "app.json";
-
-          let data = {};
-
-          if (fs.existsSync(file)) {
-            data = JSON.parse(
-              fs.readFileSync(file, "utf8")
-            );
-          }
-
-          data.expo = data.expo || {};
-
-          data.expo.name = "Vyapar Khata";
-          data.expo.slug = "vyapar-khata";
-          data.expo.version = data.expo.version || "1.0.0";
-
-          data.expo.android =
-            data.expo.android || {};
-
-          /*
-           * IMPORTANT:
-           * Existing Google Play application ID.
-           */
-          data.expo.android.package =
-            "com.vyapar.khatabook.free";
-
-          /*
-           * Generate a new Play-compatible versionCode
-           * for every GitHub Actions run.
-           */
-          const runNumber =
-            Number(process.env.GITHUB_RUN_NUMBER || 1);
-
-          const versionCode =
-            1100 + runNumber;
-
-          data.expo.android.versionCode =
-            versionCode;
-
-          fs.writeFileSync(
-            file,
-            JSON.stringify(data, null, 2) + "\n"
-          );
-
-          console.log(
-            "App name:",
-            data.expo.name
-          );
-
-          console.log(
-            "Package:",
-            data.expo.android.package
-          );
-
-          console.log(
-            "Version code:",
-            versionCode
-          );
-          NODE
-
-      - name: Verify Android package
-        shell: bash
-        run: |
-          node <<'NODE'
-          const fs = require("fs");
-
-          const data = JSON.parse(
-            fs.readFileSync("app.json", "utf8")
-          );
-
-          const pkg =
-            data.expo &&
-            data.expo.android &&
-            data.expo.android.package;
-
-          if (
-            pkg !==
-            "com.vyapar.khatabook.free"
-          ) {
-            console.error(
-              "ERROR: Wrong Android package:"
-            );
-            console.error(pkg);
-            process.exit(1);
-          }
-
-          console.log(
-            "SUCCESS: Android package = " + pkg
-          );
-
-          console.log(
-            "Version code = " +
-            data.expo.android.versionCode
-          );
-          NODE
-
-      - name: Check JavaScript syntax
-        shell: bash
-        run: |
-          if [ -f App.js ]; then
-            echo "Checking App.js..."
-            node --check App.js
-            echo "App.js syntax is OK."
-          else
-            echo "ERROR: App.js not found."
+          test -f package.json || {
+            echo "ERROR: package.json not found"
             exit 1
-          fi
+          }
 
-      - name: Create eas.json
+          test -f App.js || {
+            echo "ERROR: App.js not found"
+            exit 1
+          }
+
+      # --------------------------------------------------
+      # 5. Install Expo + React + required packages
+      # --------------------------------------------------
+      - name: Install project dependencies
         shell: bash
         run: |
-          cat > eas.json <<'EOF'
-          {
-            "cli": {
-              "version": ">= 12.0.0",
-              "appVersionSource": "local"
-            },
-            "build": {
-              "production": {
-                "distribution": "store",
-                "android": {
-                  "buildType": "app-bundle"
-                }
-              }
-            }
-          }
+          npm install
+
+          npm install \
+            expo@51.0.39 \
+            react@18.2.0 \
+            react-native@0.74.5 \
+            @react-native-async-storage/async-storage
+
+      # --------------------------------------------------
+      # 6. Create Babel configuration
+      # --------------------------------------------------
+      - name: Configure Babel
+        shell: bash
+        run: |
+          cat > babel.config.js <<'EOF'
+          module.exports = function(api) {
+            api.cache(true);
+
+            return {
+              presets: ["babel-preset-expo"]
+            };
+          };
           EOF
 
-          echo "===== eas.json ====="
-          cat eas.json
+          npm install --save-dev babel-preset-expo@11.0.10
 
-      - name: Verify Expo configuration
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      # --------------------------------------------------
+      # 7. Create Expo entry file
+      # --------------------------------------------------
+      - name: Create index.js
         shell: bash
         run: |
-          if [ -z "$EXPO_TOKEN" ]; then
-            echo "ERROR: EXPO_TOKEN GitHub Secret is missing."
-            exit 1
-          fi
+          cat > index.js <<'EOF'
+          import { registerRootComponent } from "expo";
+          import App from "./App";
 
+          registerRootComponent(App);
+          EOF
+
+      # --------------------------------------------------
+      # 8. Configure package.json + app.json
+      # --------------------------------------------------
+      - name: Configure Expo Android
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+
+          const run = parseInt(process.env.RUN_NUMBER || "1", 10);
+
+          // ----------------------------------------------
+          // package.json
+          // ----------------------------------------------
+          const pkg = JSON.parse(
+            fs.readFileSync("package.json", "utf8")
+          );
+
+          pkg.main = "index.js";
+
+          fs.writeFileSync(
+            "package.json",
+            JSON.stringify(pkg, null, 2)
+          );
+
+          // ----------------------------------------------
+          // app.json
+          // ----------------------------------------------
+          let app;
+
+          if (fs.existsSync("app.json")) {
+            app = JSON.parse(
+              fs.readFileSync("app.json", "utf8")
+            );
+          } else {
+            app = {
+              expo: {}
+            };
+          }
+
+          app.expo = app.expo || {};
+
+          app.expo.name = "Vyapar Khata";
+          app.expo.slug = "vyapar-khata";
+          app.expo.version = `2.0.${run}`;
+
+          app.expo.orientation = "portrait";
+
+          app.expo.android = {
+            ...(app.expo.android || {}),
+            package: "com.vyapar.khatabook.free",
+
+            // Always higher than previous Play versions
+            versionCode: 2000 + run
+          };
+
+          fs.writeFileSync(
+            "app.json",
+            JSON.stringify(app, null, 2)
+          );
+
+          console.log(
+            "Android versionCode =",
+            2000 + run
+          );
+          NODE
+
+      # --------------------------------------------------
+      # 9. Verify Expo configuration
+      # --------------------------------------------------
+      - name: Verify Expo
+        shell: bash
+        run: |
+          npx expo --version
           npx expo config --type public
 
-      - name: Link existing EAS project
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      # --------------------------------------------------
+      # 10. Generate Android project
+      # --------------------------------------------------
+      - name: Prebuild Android
         shell: bash
         run: |
-          set -e
+          rm -rf android
 
-          echo "Linking existing EAS project..."
-
-          eas init \
-            --id 0d5c6770-6292-474a-b0c0-6a34adc0cf9d \
-            --non-interactive
-
-          echo "Existing EAS project linked."
-
-      - name: Verify EAS project
-        shell: bash
-        run: |
-          echo "===== app.json after EAS linking ====="
-          cat app.json
-
-          echo ""
-          echo "===== eas.json ====="
-          cat eas.json
-
-      - name: Build Android AAB
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
-        shell: bash
-        run: |
-          set -e
-
-          echo "======================================"
-          echo "Starting EAS Android production AAB build"
-          echo "======================================"
-
-          eas build \
+          npx expo prebuild \
             --platform android \
-            --profile production \
-            --non-interactive \
-            --wait
+            --no-install \
+            --clean
 
-      - name: Download AAB
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      # --------------------------------------------------
+      # 11. Force API 36
+      # --------------------------------------------------
+      - name: Configure Android API 36
         shell: bash
         run: |
-          set -e
+          test -f android/app/build.gradle || {
+            echo "ERROR: android/app/build.gradle not found"
+            exit 1
+          }
 
-          echo "Getting latest Android build..."
+          python3 <<'PY'
+          from pathlib import Path
+          import re
 
-          BUILD_JSON=$(eas build:list \
-            --platform android \
-            --status finished \
-            --limit 1 \
-            --json)
+          p = Path("android/app/build.gradle")
+          text = p.read_text()
 
-          echo "$BUILD_JSON"
-
-          BUILD_URL=$(node -e '
-            const fs = require("fs");
-
-            const input = fs.readFileSync(
-              0,
-              "utf8"
-            );
-
-            const builds = JSON.parse(input);
-
-            if (
-              !Array.isArray(builds) ||
-              builds.length === 0
-            ) {
-              console.error(
-                "No finished Android build found."
-              );
-              process.exit(1);
-            }
-
-            const build = builds[0];
-
-            const url =
-              build.artifacts &&
-              build.artifacts.buildUrl;
-
-            if (!url) {
-              console.error(
-                "AAB build URL not found."
-              );
-              process.exit(1);
-            }
-
-            console.log(url);
-          ' <<< "$BUILD_JSON")
-
-          echo "AAB URL:"
-          echo "$BUILD_URL"
-
-          curl \
-            --fail \
-            --location \
-            "$BUILD_URL" \
-            --output vyapar-khata-release.aab
-
-          echo ""
-          echo "===== AAB FILE ====="
-
-          ls -lh vyapar-khata-release.aab
-
-          FILE_SIZE=$(
-            stat -c%s vyapar-khata-release.aab
+          text = re.sub(
+              r'targetSdkVersion\s+\d+',
+              'targetSdkVersion 36',
+              text
           )
 
-          if [ "$FILE_SIZE" -lt 1000000 ]; then
-            echo "ERROR: AAB file is too small."
-            exit 1
-          fi
+          text = re.sub(
+              r'compileSdkVersion\s+\d+',
+              'compileSdkVersion 36',
+              text
+          )
 
-          echo ""
-          echo "AAB downloaded successfully."
+          text = re.sub(
+              r'compileSdk\s*=\s*\d+',
+              'compileSdk = 36',
+              text
+          )
 
-      - name: Upload AAB artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: vyapar-khata-aab
-          path: vyapar-khata-release.aab
-          if-no-files-found: error
-          retention-days: 30
+          text = re.sub(
+              r'targetSdk\s*=\s*\d+',
+              'targetSdk = 36',
+              text
+          )
 
-      - name: Final result
+          p.write_text(text)
+
+          print("Android API 36 configured")
+          PY
+
+          echo "android.suppressUnsupportedCompileSdk=36" \
+            >> android/gradle.properties
+
+          echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" \
+            >> android/gradle.properties
+
+      # --------------------------------------------------
+      # 12. Restore SAME upload keystore
+      # --------------------------------------------------
+      - name: Restore upload keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         shell: bash
         run: |
-          echo ""
-          echo "======================================"
-          echo "       VYAPAR KHATA AAB READY"
-          echo "======================================"
-          echo ""
-          echo "Artifact:"
-          echo "vyapar-khata-aab"
-          echo ""
-          echo "Open GitHub Actions -> this run -> Artifacts"
-          echo "======================================"
+          test -n "$KEYSTORE_BASE64" || {
+            echo "ERROR: KEYSTORE_BASE64 secret is missing"
+            exit 1
+          }
+
+          mkdir -p android/app
+
+          echo "$KEYSTORE_BASE64" | base64 --decode \
+            > android/app/upload-keystore.jks
+
+          test -s android/app/upload-keystore.jks || {
+            echo "ERROR: Keystore file is empty"
+            exit 1
+          }
+
+          echo "Keystore restored successfully"
+
+      # --------------------------------------------------
+      # 13. Configure release signing
+      # --------------------------------------------------
+      - name: Configure release signing
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        shell: bash
+        run: |
+          test -n "$KEYSTORE_PASSWORD" || {
+            echo "ERROR: KEYSTORE_PASSWORD missing"
+            exit 1
+          }
+
+          test -n "$KEY_ALIAS" || {
+            echo "ERROR: KEY_ALIAS missing"
+            exit 1
+          }
+
+          test -n "$KEY_PASSWORD" || {
+            echo "ERROR: KEY_PASSWORD missing"
+            exit 1
+          }
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("android/app/build.gradle")
+          text = p.read_text()
+
+          # Remove accidental duplicate upload signing block
+          if "upload-keystore.jks" not in text:
+              signing_block = """
+                  release {
+                      storeFile file('upload-keystore.jks')
+                      storePassword System.getenv('KEYSTORE_PASSWORD')
+                      keyAlias System.getenv('KEY_ALIAS')
+                      keyPassword System.getenv('KEY_PASSWORD')
+                  }
+              """
+
+              marker = "signingConfigs {"
+
+              if marker in text:
+                  text = text.replace(
+                      marker,
+                      marker + signing_block,
+                      1
+                  )
+              else:
+                  raise SystemExit(
+                      "ERROR: signingConfigs block not found"
+                  )
+
+          # Release must use upload keystore
+          text = text.replace(
+              "signingConfig signingConfigs.debug",
+              "signingConfig signingConfigs.release"
+          )
+
+          p.write_text(text)
+
+          print("Release signing configured")
+          PY
+
+      # --------------------------------------------------
+      # 14. Verify signing configuration
+      # --------------------------------------------------
+      - name: Verify keystore
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        shell: bash
+        run: |
+          keytool -list \
+            -v \
+            -keystore android/app/upload-keystore.jks \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -alias "$KEY_ALIAS" \
+            | grep -E "Alias name|SHA1|SHA-256" || true
+
+      # --------------------------------------------------
+      # 15. Build Release AAB
+      # --------------------------------------------------
+      - name: Build Android AAB
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        shell: bash
+        run: |
+          cd android
+
+          chmod +x gradlew
+
+          ./gradlew clean bundleRelease \
+            --no-daemon \
+            --stacktrace
+
+      # --------------------------------------------------
+      # 16. Find AAB
+      # --------------------------------------------------
+      - name: Find AAB
+        shell: bash
+        run: |
+          echo "===== SEARCHING FOR AAB ====="
+
+          find android \
+            -type f \
+            -name "*.aab" \
+            -print
+
+          AAB=$(find android \
+            -type f \
+            -name "*.aab" \
+            | head -n 1)
+
+          test -n "$AAB" || {
+            echo "ERROR: AAB was not generated"
+            exit 1
+          }
+
+          echo "AAB FOUND:"
+          echo "$AAB"
+
+      # --------------------------------------------------
+      # 17. Upload AAB artifact
+      # --------------------------------------------------
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: vyapar-khata-aab-${{ github.run_number }}
+          path: android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 7

@@ -311,8 +311,28 @@ jobs:
           mkdir -p android/app
 
           printf '%s' "$KEYSTORE_BASE64" |
-            base64 --decode >
-            android/app/upload-keystore.jks
+           
+      - name: Restore upload keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          test -n "$KEYSTORE_BASE64" || {
+            echo "ERROR: KEYSTORE_BASE64 secret missing"
+            exit 1
+          }
+
+          mkdir -p android/app
+
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+
+          test -s android/app/upload-keystore.jks || {
+            echo "ERROR: Keystore is empty"
+            exit 1
+          }
+
+          echo "Keystore restored successfully."
+
 
           test -s android/app/upload-keystore.jks || {
             echo "ERROR: Keystore is empty"

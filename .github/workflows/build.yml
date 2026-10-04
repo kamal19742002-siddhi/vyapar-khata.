@@ -186,6 +186,8 @@ jobs:
           app.expo.android.versionCode =
             2000 + run;
 
+          app.expo.android.minSdkVersion = 24;
+
           app.expo.android.adaptiveIcon = {
             foregroundImage:
               "./assets/adaptive-icon.png",
@@ -216,9 +218,14 @@ jobs:
             "VersionCode:",
             app.expo.android.versionCode
           );
+
+          console.log(
+            "MinSdkVersion:",
+            app.expo.android.minSdkVersion
+          );
           NODE
 
-      - name: Verify configuration
+      - name: Verify Expo configuration
         shell: bash
         run: |
           npx expo config --type public
@@ -249,7 +256,7 @@ jobs:
             --clean \
             --no-install
 
-      - name: Configure Android SDK
+      - name: Force Android SDK versions
         shell: bash
         run: |
           python3 <<'PY'
@@ -259,40 +266,102 @@ jobs:
           p = Path("android/app/build.gradle")
           text = p.read_text()
 
+          # Force min SDK 24
           text = re.sub(
-              r'targetSdkVersion\s+\d+',
-              'targetSdkVersion 36',
+              r'minSdkVersion\s*=?\s*\d+',
+              'minSdkVersion 24',
               text
           )
 
           text = re.sub(
-              r'compileSdkVersion\s+\d+',
+              r'minSdk\s*=?\s*\d+',
+              'minSdk 24',
+              text
+          )
+
+          # Force compile SDK 36
+          text = re.sub(
+              r'compileSdkVersion\s*=?\s*\d+',
               'compileSdkVersion 36',
               text
           )
 
           text = re.sub(
-              r'compileSdk\s*=\s*\d+',
-              'compileSdk = 36',
+              r'compileSdk\s*=?\s*\d+',
+              'compileSdk 36',
+              text
+          )
+
+          # Force target SDK 36
+          text = re.sub(
+              r'targetSdkVersion\s*=?\s*\d+',
+              'targetSdkVersion 36',
               text
           )
 
           text = re.sub(
-              r'targetSdk\s*=\s*\d+',
-              'targetSdk = 36',
+              r'targetSdk\s*=?\s*\d+',
+              'targetSdk 36',
               text
           )
 
           p.write_text(text)
+
+          # Also configure gradle properties
+          gp = Path("android/gradle.properties")
+
+          existing = ""
+          if gp.exists():
+              existing = gp.read_text()
+
+          lines = [
+              line for line in existing.splitlines()
+              if not line.startswith("android.minSdkVersion=")
+              and not line.startswith(
+                  "android.suppressUnsupportedCompileSdk="
+              )
+          ]
+
+          lines.append("android.minSdkVersion=24")
+          lines.append(
+              "android.suppressUnsupportedCompileSdk=36"
+          )
+
+          if not any(
+              line.startswith("org.gradle.jvmargs=")
+              for line in lines
+          ):
+              lines.append(
+                  "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m"
+              )
+
+          gp.write_text("\n".join(lines) + "\n")
+
+          print("Android SDK configuration updated.")
+          print("minSdk = 24")
+          print("compileSdk = 36")
+          print("targetSdk = 36")
           PY
 
-          touch android/gradle.properties
+          echo "===== GENERATED GRADLE SDK SETTINGS ====="
 
-          echo "android.suppressUnsupportedCompileSdk=36" \
-            >> android/gradle.properties
+          grep -RniE \
+            "minSdkVersion|minSdk|compileSdkVersion|compileSdk|targetSdkVersion|targetSdk" \
+            android/app \
+            android/gradle.properties || true
 
-          echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" \
-            >> android/gradle.properties
+          echo "===== CHECKING FOR MIN SDK 23 ====="
+
+          if grep -RniE \
+            "minSdkVersion[[:space:]]+23|minSdk[[:space:]]+23" \
+            android/app \
+            android/gradle.properties; then
+
+            echo "ERROR: minSdk 23 is still present."
+            exit 1
+          fi
+
+          echo "SUCCESS: minSdk 23 not found."
 
       - name: Restore upload keystore
         env:
@@ -306,8 +375,9 @@ jobs:
 
           mkdir -p android/app
 
-          printf '%s' "$KEYSTORE_BASE64" | \
-            base64 --decode > android/app/upload-keystore.jks
+          printf '%s' "$KEYSTORE_BASE64" |
+            base64 --decode >
+            android/app/upload-keystore.jks
 
           test -s android/app/upload-keystore.jks || {
             echo "ERROR: Keystore is empty"
@@ -344,26 +414,26 @@ jobs:
           p = Path("android/app/build.gradle")
           text = p.read_text()
 
-          if "upload-keystore.jks" not in text:
-              marker = "signingConfigs {"
+          signing_block = """
+              release {
+                  storeFile file('upload-keystore.jks')
+                  storePassword System.getenv('KEYSTORE_PASSWORD')
+                  keyAlias System.getenv('KEY_ALIAS')
+                  keyPassword System.getenv('KEY_PASSWORD')
+              }
+          """
 
-              block = """
-                  release {
-                      storeFile file('upload-keystore.jks')
-                      storePassword System.getenv('KEYSTORE_PASSWORD')
-                      keyAlias System.getenv('KEY_ALIAS')
-                      keyPassword System.getenv('KEY_PASSWORD')
-                  }
-              """
+          if "storeFile file('upload-keystore.jks')" not in text:
+              marker = "signingConfigs {"
 
               if marker not in text:
                   raise SystemExit(
-                      "ERROR: signingConfigs not found"
+                      "ERROR: signingConfigs block not found"
                   )
 
               text = text.replace(
                   marker,
-                  marker + block,
+                  marker + signing_block,
                   1
               )
 
@@ -400,7 +470,9 @@ jobs:
 
           chmod +x gradlew
 
-          ./gradlew clean bundleRelease \
+          ./gradlew \
+            clean \
+            bundleRelease \
             --no-daemon \
             --stacktrace
 
@@ -441,4 +513,5 @@ jobs:
           echo "================================"
           echo "VYAPAR KHATA AAB BUILD COMPLETE"
           echo "================================"
+          echo "AAB artifact is ready."
           echo "Go to Actions -> this run -> Artifacts"

@@ -44,16 +44,9 @@ jobs:
         run: |
           npm install --legacy-peer-deps
 
-          npm install \
-            expo@51.0.39 \
-            react@18.2.0 \
-            react-native@0.74.5 \
-            @react-native-async-storage/async-storage \
-            --legacy-peer-deps
+          npm install expo@51.0.39 react@18.2.0 react-native@0.74.5 @react-native-async-storage/async-storage --legacy-peer-deps
 
-          npm install \
-            --save-dev babel-preset-expo@11.0.10 \
-            --legacy-peer-deps
+          npm install --save-dev babel-preset-expo@11.0.10 --legacy-peer-deps
 
       - name: Configure Babel
         shell: bash
@@ -61,7 +54,6 @@ jobs:
           cat > babel.config.js <<'EOF'
           module.exports = function(api) {
             api.cache(true);
-
             return {
               presets: ["babel-preset-expo"]
             };
@@ -89,11 +81,8 @@ jobs:
           from pathlib import Path
 
           def make_png(path, width, height):
-              raw = b""
               row = b"\xff\xff\xff" * width
-
-              for _ in range(height):
-                  raw += b"\x00" + row
+              raw = b"".join(b"\x00" + row for _ in range(height))
 
               def chunk(name, data):
                   return (
@@ -107,7 +96,6 @@ jobs:
                   )
 
               png = b"\x89PNG\r\n\x1a\n"
-
               png += chunk(
                   b"IHDR",
                   struct.pack(
@@ -121,12 +109,7 @@ jobs:
                       0
                   )
               )
-
-              png += chunk(
-                  b"IDAT",
-                  zlib.compress(raw, 9)
-              )
-
+              png += chunk(b"IDAT", zlib.compress(raw, 9))
               png += chunk(b"IEND", b"")
 
               Path(path).write_bytes(png)
@@ -136,10 +119,9 @@ jobs:
           make_png("assets/splash.png", 1284, 2778)
           make_png("assets/favicon.png", 48, 48)
 
-          print("All Expo PNG assets created.")
+          print("Expo assets created successfully.")
           PY
 
-          echo "===== ASSETS ====="
           ls -lh assets/
 
       - name: Configure Expo
@@ -150,9 +132,7 @@ jobs:
           node <<'NODE'
           const fs = require("fs");
 
-          const run = Number(
-            process.env.RUN_NUMBER || "1"
-          );
+          const run = Number(process.env.RUN_NUMBER || "1");
 
           let app = {};
 
@@ -163,6 +143,7 @@ jobs:
           }
 
           app.expo = app.expo || {};
+          app.expo.android = app.expo.android || {};
 
           app.expo.name = "Vyapar Khata";
           app.expo.slug = "vyapar-khata";
@@ -176,9 +157,6 @@ jobs:
             resizeMode: "contain",
             backgroundColor: "#ffffff"
           };
-
-          app.expo.android =
-            app.expo.android || {};
 
           app.expo.android.package =
             "com.vyapar.khatabook.free";
@@ -204,46 +182,34 @@ jobs:
             JSON.stringify(app, null, 2) + "\n"
           );
 
-          console.log(
-            "Package:",
-            app.expo.android.package
-          );
-
-          console.log(
-            "Version:",
-            app.expo.version
-          );
-
+          console.log("Package:", app.expo.android.package);
+          console.log("Version:", app.expo.version);
           console.log(
             "VersionCode:",
             app.expo.android.versionCode
           );
-
           console.log(
             "MinSdkVersion:",
             app.expo.android.minSdkVersion
           );
           NODE
 
-      - name: Verify Expo configuration
+      - name: Verify configuration
         shell: bash
         run: |
           npx expo config --type public
-
-          echo "Checking assets..."
 
           test -f assets/icon.png
           test -f assets/adaptive-icon.png
           test -f assets/splash.png
           test -f assets/favicon.png
 
-          echo "All assets exist."
+          echo "Configuration and assets OK."
 
       - name: Check App.js syntax
         shell: bash
         run: |
           node --check App.js
-
           echo "App.js syntax OK."
 
       - name: Generate Android project
@@ -266,7 +232,6 @@ jobs:
           p = Path("android/app/build.gradle")
           text = p.read_text()
 
-          # Force min SDK 24
           text = re.sub(
               r'minSdkVersion\s*=?\s*\d+',
               'minSdkVersion 24',
@@ -279,7 +244,6 @@ jobs:
               text
           )
 
-          # Force compile SDK 36
           text = re.sub(
               r'compileSdkVersion\s*=?\s*\d+',
               'compileSdkVersion 36',
@@ -292,7 +256,6 @@ jobs:
               text
           )
 
-          # Force target SDK 36
           text = re.sub(
               r'targetSdkVersion\s*=?\s*\d+',
               'targetSdkVersion 36',
@@ -307,7 +270,6 @@ jobs:
 
           p.write_text(text)
 
-          # Also configure gradle properties
           gp = Path("android/gradle.properties")
 
           existing = ""
@@ -315,8 +277,11 @@ jobs:
               existing = gp.read_text()
 
           lines = [
-              line for line in existing.splitlines()
-              if not line.startswith("android.minSdkVersion=")
+              line
+              for line in existing.splitlines()
+              if not line.startswith(
+                  "android.minSdkVersion="
+              )
               and not line.startswith(
                   "android.suppressUnsupportedCompileSdk="
               )
@@ -337,27 +302,23 @@ jobs:
 
           gp.write_text("\n".join(lines) + "\n")
 
-          print("Android SDK configuration updated.")
           print("minSdk = 24")
           print("compileSdk = 36")
           print("targetSdk = 36")
           PY
 
-          echo "===== GENERATED GRADLE SDK SETTINGS ====="
+          echo "===== SDK SETTINGS ====="
 
           grep -RniE \
             "minSdkVersion|minSdk|compileSdkVersion|compileSdk|targetSdkVersion|targetSdk" \
             android/app \
             android/gradle.properties || true
 
-          echo "===== CHECKING FOR MIN SDK 23 ====="
-
           if grep -RniE \
             "minSdkVersion[[:space:]]+23|minSdk[[:space:]]+23" \
             android/app \
             android/gradle.properties; then
-
-            echo "ERROR: minSdk 23 is still present."
+            echo "ERROR: minSdk 23 still exists."
             exit 1
           fi
 
@@ -375,9 +336,7 @@ jobs:
 
           mkdir -p android/app
 
-          printf '%s' "$KEYSTORE_BASE64" |
-            base64 --decode >
-            android/app/upload-keystore.jks
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
 
           test -s android/app/upload-keystore.jks || {
             echo "ERROR: Keystore is empty"
@@ -414,17 +373,17 @@ jobs:
           p = Path("android/app/build.gradle")
           text = p.read_text()
 
-          signing_block = """
+          if "storeFile file('upload-keystore.jks')" not in text:
+              marker = "signingConfigs {"
+
+              block = """
               release {
                   storeFile file('upload-keystore.jks')
                   storePassword System.getenv('KEYSTORE_PASSWORD')
                   keyAlias System.getenv('KEY_ALIAS')
                   keyPassword System.getenv('KEY_PASSWORD')
               }
-          """
-
-          if "storeFile file('upload-keystore.jks')" not in text:
-              marker = "signingConfigs {"
+              """
 
               if marker not in text:
                   raise SystemExit(
@@ -433,7 +392,7 @@ jobs:
 
               text = text.replace(
                   marker,
-                  marker + signing_block,
+                  marker + block,
                   1
               )
 
@@ -470,11 +429,7 @@ jobs:
 
           chmod +x gradlew
 
-          ./gradlew \
-            clean \
-            bundleRelease \
-            --no-daemon \
-            --stacktrace
+          ./gradlew clean bundleRelease --no-daemon --stacktrace
 
       - name: Find AAB
         shell: bash

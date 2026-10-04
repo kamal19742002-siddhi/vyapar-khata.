@@ -17,7 +17,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -168,7 +167,6 @@ jobs:
           app.expo.name = "Vyapar Khata";
           app.expo.slug = "vyapar-khata";
           app.expo.version = `2.0.${run}`;
-
           app.expo.orientation = "portrait";
 
           app.expo.icon = "./assets/icon.png";
@@ -290,13 +288,11 @@ jobs:
 
           touch android/gradle.properties
 
-          echo \
-          "android.suppressUnsupportedCompileSdk=36" \
-          >> android/gradle.properties
+          echo "android.suppressUnsupportedCompileSdk=36" \
+            >> android/gradle.properties
 
-          echo \
-          "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" \
-          >> android/gradle.properties
+          echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" \
+            >> android/gradle.properties
 
       - name: Restore upload keystore
         env:
@@ -310,29 +306,8 @@ jobs:
 
           mkdir -p android/app
 
-          printf '%s' "$KEYSTORE_BASE64" |
-           
-      - name: Restore upload keystore
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        shell: bash
-        run: |
-          test -n "$KEYSTORE_BASE64" || {
-            echo "ERROR: KEYSTORE_BASE64 secret missing"
-            exit 1
-          }
-
-          mkdir -p android/app
-
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
-
-          test -s android/app/upload-keystore.jks || {
-            echo "ERROR: Keystore is empty"
-            exit 1
-          }
-
-          echo "Keystore restored successfully."
-
+          printf '%s' "$KEYSTORE_BASE64" | \
+            base64 --decode > android/app/upload-keystore.jks
 
           test -s android/app/upload-keystore.jks || {
             echo "ERROR: Keystore is empty"
@@ -402,7 +377,6 @@ jobs:
           print("Release signing configured.")
           PY
 
-         
       - name: Verify signing certificate
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -414,7 +388,6 @@ jobs:
             -storepass "$KEYSTORE_PASSWORD" \
             -alias "$KEY_ALIAS"
 
-
       - name: Build Android AAB
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
@@ -424,8 +397,13 @@ jobs:
         shell: bash
         run: |
           cd android
+
           chmod +x gradlew
-          ./gradlew clean bundleRelease --no-daemon --stacktrace
+
+          ./gradlew clean bundleRelease \
+            --no-daemon \
+            --stacktrace
+
       - name: Find AAB
         shell: bash
         run: |

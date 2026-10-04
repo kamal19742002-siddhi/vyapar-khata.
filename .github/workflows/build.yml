@@ -9,32 +9,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-
-      - name: Check project files
-        shell: bash
-        run: |
-          echo "===== PROJECT FILES ====="
-          ls -la
-          echo "===== APP FILE ====="
-          test -f App.js && echo "App.js found" || echo "ERROR: App.js missing"
-          echo "===== PACKAGE ====="
-          test -f package.json && cat package.json || exit 1
-          echo "===== APP CONFIG ====="
-          if [ -f app.json ]; then
-            cat app.json
-          elif [ -f app.config.js ]; then
-            cat app.config.js
-          else
-            echo "ERROR: app.json/app.config.js missing"
-            exit 1
-          fi
 
       - name: Install dependencies
         shell: bash
@@ -45,25 +26,141 @@ jobs:
             npm install
           fi
 
-      - name: Install Expo and EAS CLI
+      - name: Install EAS CLI
         shell: bash
         run: |
-          npx expo --version
-          npm install --global eas-cli
+          npm install -g eas-cli
           eas --version
 
-      - name: Create EAS configuration
+      - name: Prepare app.json
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+
+          const file = "app.json";
+
+          let data = {};
+
+          if (fs.existsSync(file)) {
+            data = JSON.parse(
+              fs.readFileSync(file, "utf8")
+            );
+          }
+
+          data.expo = data.expo || {};
+
+          data.expo.name = "Vyapar Khata";
+          data.expo.slug = "vyapar-khata";
+          data.expo.version = data.expo.version || "1.0.0";
+
+          data.expo.android =
+            data.expo.android || {};
+
+          /*
+           * IMPORTANT:
+           * Existing Google Play application ID.
+           */
+          data.expo.android.package =
+            "com.vyapar.khatabook.free";
+
+          /*
+           * Generate a new Play-compatible versionCode
+           * for every GitHub Actions run.
+           */
+          const runNumber =
+            Number(process.env.GITHUB_RUN_NUMBER || 1);
+
+          const versionCode =
+            1100 + runNumber;
+
+          data.expo.android.versionCode =
+            versionCode;
+
+          fs.writeFileSync(
+            file,
+            JSON.stringify(data, null, 2) + "\n"
+          );
+
+          console.log(
+            "App name:",
+            data.expo.name
+          );
+
+          console.log(
+            "Package:",
+            data.expo.android.package
+          );
+
+          console.log(
+            "Version code:",
+            versionCode
+          );
+          NODE
+
+      - name: Verify Android package
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+
+          const data = JSON.parse(
+            fs.readFileSync("app.json", "utf8")
+          );
+
+          const pkg =
+            data.expo &&
+            data.expo.android &&
+            data.expo.android.package;
+
+          if (
+            pkg !==
+            "com.vyapar.khatabook.free"
+          ) {
+            console.error(
+              "ERROR: Wrong Android package:"
+            );
+            console.error(pkg);
+            process.exit(1);
+          }
+
+          console.log(
+            "SUCCESS: Android package = " + pkg
+          );
+
+          console.log(
+            "Version code = " +
+            data.expo.android.versionCode
+          );
+          NODE
+
+      - name: Check JavaScript syntax
+        shell: bash
+        run: |
+          if [ -f App.js ]; then
+            echo "Checking App.js..."
+            node --check App.js
+            echo "App.js syntax is OK."
+          else
+            echo "ERROR: App.js not found."
+            exit 1
+          fi
+
+      - name: Create eas.json
         shell: bash
         run: |
           cat > eas.json <<'EOF'
           {
+            "cli": {
+              "version": ">= 12.0.0",
+              "appVersionSource": "local"
+            },
             "build": {
               "production": {
                 "distribution": "store",
                 "android": {
                   "buildType": "app-bundle"
-                },
-                "autoIncrement": true
+                }
               }
             }
           }
@@ -72,7 +169,7 @@ jobs:
           echo "===== eas.json ====="
           cat eas.json
 
-      - name: Check Expo project
+      - name: Verify Expo configuration
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         shell: bash
@@ -84,62 +181,126 @@ jobs:
 
           npx expo config --type public
 
-      - name: Check JavaScript syntax
-        shell: bash
-        run: |
-          echo "Checking App.js syntax..."
-
-          node --check App.js
-
-          echo "JavaScript syntax check passed."
-
-      - name: Build Android App Bundle
+      - name: Link existing EAS project
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         shell: bash
         run: |
           set -e
 
-          echo "Starting EAS Android production AAB build..."
+          echo "Linking existing EAS project..."
+
+          eas init \
+            --id 0d5c6770-6292-474a-b0c0-6a34adc0cf9d \
+            --non-interactive
+
+          echo "Existing EAS project linked."
+
+      - name: Verify EAS project
+        shell: bash
+        run: |
+          echo "===== app.json after EAS linking ====="
+          cat app.json
+
+          echo ""
+          echo "===== eas.json ====="
+          cat eas.json
+
+      - name: Build Android AAB
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "Starting EAS Android production AAB build"
+          echo "======================================"
 
           eas build \
             --platform android \
             --profile production \
             --non-interactive \
-            --wait \
-            --json > eas-build-result.json
-
-          echo "===== EAS BUILD RESULT ====="
-          cat eas-build-result.json
+            --wait
 
       - name: Download AAB
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         shell: bash
         run: |
           set -e
 
-          BUILD_URL=$(node -e "
-          const fs=require('fs');
-          const x=JSON.parse(fs.readFileSync('eas-build-result.json','utf8'));
-          const url=x.artifacts && x.artifacts.buildUrl;
-          if(!url) process.exit(2);
-          console.log(url);
-          ")
+          echo "Getting latest Android build..."
+
+          BUILD_JSON=$(eas build:list \
+            --platform android \
+            --status finished \
+            --limit 1 \
+            --json)
+
+          echo "$BUILD_JSON"
+
+          BUILD_URL=$(node -e '
+            const fs = require("fs");
+
+            const input = fs.readFileSync(
+              0,
+              "utf8"
+            );
+
+            const builds = JSON.parse(input);
+
+            if (
+              !Array.isArray(builds) ||
+              builds.length === 0
+            ) {
+              console.error(
+                "No finished Android build found."
+              );
+              process.exit(1);
+            }
+
+            const build = builds[0];
+
+            const url =
+              build.artifacts &&
+              build.artifacts.buildUrl;
+
+            if (!url) {
+              console.error(
+                "AAB build URL not found."
+              );
+              process.exit(1);
+            }
+
+            console.log(url);
+          ' <<< "$BUILD_JSON")
 
           echo "AAB URL:"
           echo "$BUILD_URL"
 
-          curl -L "$BUILD_URL" -o vyapar-khata-release.aab
+          curl \
+            --fail \
+            --location \
+            "$BUILD_URL" \
+            --output vyapar-khata-release.aab
 
+          echo ""
           echo "===== AAB FILE ====="
+
           ls -lh vyapar-khata-release.aab
 
-          FILE_SIZE=$(stat -c%s vyapar-khata-release.aab)
+          FILE_SIZE=$(
+            stat -c%s vyapar-khata-release.aab
+          )
 
           if [ "$FILE_SIZE" -lt 1000000 ]; then
-            echo "ERROR: Downloaded AAB looks invalid."
+            echo "ERROR: AAB file is too small."
             exit 1
           fi
 
+          echo ""
           echo "AAB downloaded successfully."
 
       - name: Upload AAB artifact
@@ -150,14 +311,16 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Build summary
+      - name: Final result
         shell: bash
         run: |
+          echo ""
           echo "======================================"
           echo "       VYAPAR KHATA AAB READY"
           echo "======================================"
-          ls -lh vyapar-khata-release.aab
           echo ""
-          echo "GitHub Actions -> Artifacts"
-          echo "Download: vyapar-khata-aab"
+          echo "Artifact:"
+          echo "vyapar-khata-aab"
+          echo ""
+          echo "Open GitHub Actions -> this run -> Artifacts"
           echo "======================================"

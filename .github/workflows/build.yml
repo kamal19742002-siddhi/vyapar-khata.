@@ -3,7 +3,8 @@ name: Build Vyapar Khata AAB
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -18,12 +19,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "20"
 
       - name: Install EAS CLI
         run: npm install -g eas-cli
 
-      - name: Setup package.json
+      - name: Prepare package.json
         shell: bash
         run: |
           node <<'NODE'
@@ -38,7 +39,7 @@ jobs:
           }
 
           pkg.name = "vyapar-khata";
-          pkg.version = pkg.version || "1.0.0";
+          pkg.version = "1.0.0";
 
           pkg.dependencies = pkg.dependencies || {};
 
@@ -54,13 +55,16 @@ jobs:
           console.log("package.json prepared.");
           NODE
 
+      - name: Install dependencies
+        run: npm install
+
       - name: Create valid PNG assets
         shell: bash
         run: |
           python3 -m pip install --quiet pillow
 
           python3 <<'PY'
-          from PIL import Image, ImageDraw
+          from PIL import Image
           from pathlib import Path
 
           assets = Path("assets")
@@ -73,69 +77,17 @@ jobs:
                   (255, 255, 255, 255)
               )
 
-              draw = ImageDraw.Draw(img)
-
-              w, h = size
-              margin = max(1, min(w, h) // 8)
-
-              draw.rectangle(
-                  [
-                      margin,
-                      margin,
-                      w - margin,
-                      h - margin
-                  ],
-                  fill=(255, 255, 255, 255)
-              )
-
               img.save(
                   assets / name,
-                  format="PNG",
-                  optimize=False
+                  format="PNG"
               )
 
-              print(
-                  f"Created valid PNG: {name} {size}"
-              )
+              print(f"Created: {name} {size}")
 
           create_png("icon.png", (1024, 1024))
           create_png("adaptive-icon.png", (1024, 1024))
           create_png("splash.png", (1284, 2778))
           create_png("favicon.png", (48, 48))
-          PY
-
-      - name: Verify PNG files
-        shell: bash
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-          from PIL import Image
-
-          files = [
-              "assets/icon.png",
-              "assets/adaptive-icon.png",
-              "assets/splash.png",
-              "assets/favicon.png"
-          ]
-
-          for filename in files:
-
-              path = Path(filename)
-
-              if not path.exists():
-                  raise SystemExit(
-                      f"ERROR: Missing {filename}"
-                  )
-
-              with Image.open(path) as img:
-                  img.verify()
-
-              with Image.open(path) as img:
-                  print(
-                      f"VALID PNG: {filename} -> {img.size}"
-                  )
-
-          print("All PNG files are valid.")
           PY
 
       - name: Configure app.json
@@ -156,8 +108,12 @@ jobs:
 
           data.expo = data.expo || {};
 
-          data.expo.name = "Vyapar Khata Book";
+          data.expo.name = "Vyapar Khata";
           data.expo.slug = "vyapar-khata";
+          data.expo.version = "1.0.0";
+
+          data.expo.orientation = "portrait";
+          data.expo.userInterfaceStyle = "light";
 
           data.expo.icon = "./assets/icon.png";
 
@@ -170,10 +126,6 @@ jobs:
           data.expo.android =
             data.expo.android || {};
 
-          /*
-           * IMPORTANT:
-           * This is the existing Google Play app ID.
-           */
           data.expo.android.package =
             "com.vyapar.khatabook.free";
 
@@ -183,18 +135,22 @@ jobs:
             backgroundColor: "#ffffff"
           };
 
+          data.expo.web = {
+            favicon: "./assets/favicon.png"
+          };
+
           fs.writeFileSync(
             file,
             JSON.stringify(data, null, 2) + "\n"
           );
 
           console.log(
-            "Android package set to:",
+            "Package:",
             data.expo.android.package
           );
           NODE
 
-      - name: Check Android package
+      - name: Verify Android package
         shell: bash
         run: |
           node <<'NODE'
@@ -205,125 +161,43 @@ jobs:
           );
 
           const pkg =
-            data.expo &&
-            data.expo.android &&
             data.expo.android.package;
 
-          if (pkg !== "com.vyapar.khatabook.free") {
+          if (
+            pkg !==
+            "com.vyapar.khatabook.free"
+          ) {
             console.error(
-              "ERROR: Wrong Android package:"
+              "Wrong Android package:",
+              pkg
             );
 
-            console.error(pkg);
             process.exit(1);
           }
 
           console.log(
-            "SUCCESS: Android package = " + pkg
+            "Correct package:",
+            pkg
           );
           NODE
 
-      - name: Ensure App.js exists
+      - name: Set unique versionCode
         shell: bash
         run: |
-          if [ ! -f "App.js" ] && \
-             [ ! -f "App.tsx" ] && \
-             [ ! -f "index.js" ]; then
-
-            cat > App.js <<'EOF'
-          import React from "react";
-          import {
-            View,
-            Text
-          } from "react-native";
-
-          export default function App() {
-            return (
-              <View
-                style={{
-                  flex: 1,
-                  alignItems: "center",
-                  justifyContent: "center"
-                }}
-              >
-                <Text>
-                  Vyapar Khata
-                </Text>
-              </View>
-            );
-          }
-          EOF
-
-            echo "Fallback App.js created."
-
-          else
-            echo "Existing app entry file found."
-          fi
-
-      - name: Create eas.json
-        shell: bash
-        run: |
-          node <<'NODE'
-          const fs = require("fs");
-
-          const config = {
-            cli: {
-              version: ">= 12.0.0"
-            },
-
-            build: {
-              production: {
-                credentialsSource: "remote",
-
-                android: {
-                  buildType: "app-bundle",
-                  image:
-                    "ubuntu-22.04-jdk-17-ndk-r26b"
-                },
-
-                node: "20.18.0"
-              }
-            }
-          };
-
-          fs.writeFileSync(
-            "eas.json",
-            JSON.stringify(config, null, 2) + "\n"
-          );
-
-          console.log(
-            "eas.json configured."
-          );
-          NODE
-
-      - name: Set versionCode
-        shell: bash
-        run: |
-          if [ -z "$GITHUB_RUN_NUMBER" ]; then
-            echo "ERROR: GITHUB_RUN_NUMBER is not set."
-            exit 1
-          fi
-
           VERSION_CODE=$((1100 + GITHUB_RUN_NUMBER))
 
-          echo "Version code: $VERSION_CODE"
+          echo "VERSION_CODE=$VERSION_CODE"
 
           node <<NODE
           const fs = require("fs");
 
           const file = "app.json";
-          const versionCode = $VERSION_CODE;
-
           const data = JSON.parse(
             fs.readFileSync(file, "utf8")
           );
 
-          data.expo = data.expo || {};
-          data.expo.android =
-            data.expo.android || {};
-
           data.expo.android.versionCode =
-            versionCode;
+            $VERSION_CODE;
 
           fs.writeFileSync(
             file,
@@ -331,53 +205,69 @@ jobs:
           );
 
           console.log(
-            "SUCCESS: versionCode = " +
-            versionCode
+            "versionCode:",
+            $VERSION_CODE
           );
           NODE
 
-      - name: Final configuration check
+      - name: Create eas.json
         shell: bash
         run: |
-          echo "========== APP CONFIG =========="
+          node <<'NODE'
+          const fs = require("fs");
+
+          const eas = {
+            cli: {
+              version: ">= 12.0.0"
+            },
+            build: {
+              production: {
+                credentialsSource: "remote",
+                android: {
+                  buildType: "app-bundle"
+                },
+                node: "20.18.0"
+              }
+            }
+          };
+
+          fs.writeFileSync(
+            "eas.json",
+            JSON.stringify(eas, null, 2) + "\n"
+          );
+
+          console.log("eas.json created.");
+          NODE
+
+      - name: Check final configuration
+        shell: bash
+        run: |
+          echo "========== FINAL CONFIGURATION =========="
 
           node <<'NODE'
           const fs = require("fs");
 
-          const data = JSON.parse(
+          const app = JSON.parse(
             fs.readFileSync("app.json", "utf8")
           );
 
-          console.log(
-            "App name:",
-            data.expo.name
-          );
+          console.log("App name:");
+          console.log(app.expo.name);
 
-          console.log(
-            "Android package:",
-            data.expo.android.package
-          );
+          console.log("Package:");
+          console.log(app.expo.android.package);
 
-          console.log(
-            "Version:",
-            data.expo.version
-          );
+          console.log("Version:");
+          console.log(app.expo.version);
 
-          console.log(
-            "Version code:",
-            data.expo.android.versionCode
-          );
+          console.log("Version code:");
+          console.log(app.expo.android.versionCode);
           NODE
 
           echo ""
-          echo "========== EAS CONFIG =========="
+          echo "========== EAS CONFIGURATION =========="
 
           cat eas.json
-
-          echo ""
-          echo "========== CREDENTIAL SOURCE =========="
-
-          echo "credentialsSource = remote"
 
       - name: Build Android App Bundle
         env:
@@ -392,6 +282,14 @@ jobs:
           eas build \
             --platform android \
             --profile production \
-            --non-interactive \
-            --no-wait
+            --non-interactive
 
+      - name: Save build information
+        if: always()
+        run: |
+          echo "======================================"
+          echo "EAS ANDROID AAB BUILD FINISHED"
+          echo "======================================"
+          echo "Open the EAS build URL shown above."
+          echo "The completed Android App Bundle (.aab)"
+          echo "will be available from the EAS build."

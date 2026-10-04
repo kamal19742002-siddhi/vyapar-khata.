@@ -10,39 +10,24 @@ jobs:
 
     steps:
 
-      # --------------------------------------------------
-      # 1. Checkout
-      # --------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
-      # --------------------------------------------------
-      # 2. Node
-      # --------------------------------------------------
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
 
-      # --------------------------------------------------
-      # 3. Java 17
-      # --------------------------------------------------
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      # --------------------------------------------------
-      # 4. Check files
-      # --------------------------------------------------
       - name: Check project
         shell: bash
         run: |
-          echo "===== PROJECT ====="
-          ls -la
-          echo "==================="
-
           test -f package.json || {
             echo "ERROR: package.json missing"
             exit 1
@@ -53,9 +38,8 @@ jobs:
             exit 1
           }
 
-      # --------------------------------------------------
-      # 5. Install dependencies
-      # --------------------------------------------------
+          echo "Project files OK"
+
       - name: Install dependencies
         shell: bash
         run: |
@@ -68,13 +52,10 @@ jobs:
             @react-native-async-storage/async-storage \
             --legacy-peer-deps
 
-          npm install --save-dev \
-            babel-preset-expo@11.0.10 \
+          npm install \
+            --save-dev babel-preset-expo@11.0.10 \
             --legacy-peer-deps
 
-      # --------------------------------------------------
-      # 6. Babel
-      # --------------------------------------------------
       - name: Configure Babel
         shell: bash
         run: |
@@ -88,9 +69,6 @@ jobs:
           };
           EOF
 
-      # --------------------------------------------------
-      # 7. Expo entry
-      # --------------------------------------------------
       - name: Configure entry
         shell: bash
         run: |
@@ -101,9 +79,70 @@ jobs:
           registerRootComponent(App);
           EOF
 
-      # --------------------------------------------------
-      # 8. Configure package + app
-      # --------------------------------------------------
+      - name: Create Expo assets
+        shell: bash
+        run: |
+          mkdir -p assets
+
+          python3 <<'PY'
+          import struct
+          import zlib
+          from pathlib import Path
+
+          def make_png(path, width, height):
+              raw = b""
+              row = b"\xff\xff\xff" * width
+
+              for _ in range(height):
+                  raw += b"\x00" + row
+
+              def chunk(name, data):
+                  return (
+                      struct.pack(">I", len(data))
+                      + name
+                      + data
+                      + struct.pack(
+                          ">I",
+                          zlib.crc32(name + data) & 0xffffffff
+                      )
+                  )
+
+              png = b"\x89PNG\r\n\x1a\n"
+
+              png += chunk(
+                  b"IHDR",
+                  struct.pack(
+                      ">IIBBBBB",
+                      width,
+                      height,
+                      8,
+                      2,
+                      0,
+                      0,
+                      0
+                  )
+              )
+
+              png += chunk(
+                  b"IDAT",
+                  zlib.compress(raw, 9)
+              )
+
+              png += chunk(b"IEND", b"")
+
+              Path(path).write_bytes(png)
+
+          make_png("assets/icon.png", 1024, 1024)
+          make_png("assets/adaptive-icon.png", 1024, 1024)
+          make_png("assets/splash.png", 1284, 2778)
+          make_png("assets/favicon.png", 48, 48)
+
+          print("All Expo PNG assets created.")
+          PY
+
+          echo "===== ASSETS ====="
+          ls -lh assets/
+
       - name: Configure Expo
         env:
           RUN_NUMBER: ${{ github.run_number }}
@@ -112,26 +151,11 @@ jobs:
           node <<'NODE'
           const fs = require("fs");
 
-          const run = parseInt(
-            process.env.RUN_NUMBER || "1",
-            10
+          const run = Number(
+            process.env.RUN_NUMBER || "1"
           );
 
-          const packageJson =
-            JSON.parse(
-              fs.readFileSync("package.json", "utf8")
-            );
-
-          packageJson.main = "index.js";
-
-          fs.writeFileSync(
-            "package.json",
-            JSON.stringify(packageJson, null, 2)
-          );
-
-          let app = {
-            expo: {}
-          };
+          let app = {};
 
           if (fs.existsSync("app.json")) {
             app = JSON.parse(
@@ -144,42 +168,79 @@ jobs:
           app.expo.name = "Vyapar Khata";
           app.expo.slug = "vyapar-khata";
           app.expo.version = `2.0.${run}`;
+
           app.expo.orientation = "portrait";
 
-          app.expo.android = {
-            ...(app.expo.android || {}),
-            package: "com.vyapar.khatabook.free",
-            versionCode: 2000 + run
+          app.expo.icon = "./assets/icon.png";
+
+          app.expo.splash = {
+            image: "./assets/splash.png",
+            resizeMode: "contain",
+            backgroundColor: "#ffffff"
+          };
+
+          app.expo.android =
+            app.expo.android || {};
+
+          app.expo.android.package =
+            "com.vyapar.khatabook.free";
+
+          app.expo.android.versionCode =
+            2000 + run;
+
+          app.expo.android.adaptiveIcon = {
+            foregroundImage:
+              "./assets/adaptive-icon.png",
+            backgroundColor: "#ffffff"
+          };
+
+          app.expo.web = {
+            ...(app.expo.web || {}),
+            favicon: "./assets/favicon.png"
           };
 
           fs.writeFileSync(
             "app.json",
-            JSON.stringify(app, null, 2)
+            JSON.stringify(app, null, 2) + "\n"
           );
 
           console.log(
-            "VERSION:",
-            `2.0.${run}`
+            "Package:",
+            app.expo.android.package
           );
 
           console.log(
-            "VERSION CODE:",
-            2000 + run
+            "Version:",
+            app.expo.version
+          );
+
+          console.log(
+            "VersionCode:",
+            app.expo.android.versionCode
           );
           NODE
 
-      # --------------------------------------------------
-      # 9. Verify Expo
-      # --------------------------------------------------
-      - name: Verify Expo configuration
+      - name: Verify configuration
         shell: bash
         run: |
-          npx expo --version
           npx expo config --type public
 
-      # --------------------------------------------------
-      # 10. Prebuild Android
-      # --------------------------------------------------
+          echo "Checking assets..."
+
+          test -f assets/icon.png
+          test -f assets/adaptive-icon.png
+          test -f assets/splash.png
+          test -f assets/favicon.png
+
+          echo "All assets exist."
+
+      - name: Check App.js syntax
+        shell: bash
+        run: |
+          node --check App.js
+
+          echo "App.js syntax OK."
+
       - name: Generate Android project
         shell: bash
         run: |
@@ -190,17 +251,9 @@ jobs:
             --clean \
             --no-install
 
-      # --------------------------------------------------
-      # 11. Configure Android SDK 36
-      # --------------------------------------------------
-      - name: Configure Android SDK 36
+      - name: Configure Android SDK
         shell: bash
         run: |
-          test -f android/app/build.gradle || {
-            echo "ERROR: android/app/build.gradle missing"
-            exit 1
-          }
-
           python3 <<'PY'
           from pathlib import Path
           import re
@@ -233,27 +286,18 @@ jobs:
           )
 
           p.write_text(text)
-
-          print("Android SDK 36 configured")
           PY
 
           touch android/gradle.properties
 
-          grep -q \
-            "android.suppressUnsupportedCompileSdk=36" \
-            android/gradle.properties || \
-            echo "android.suppressUnsupportedCompileSdk=36" \
-            >> android/gradle.properties
+          echo \
+          "android.suppressUnsupportedCompileSdk=36" \
+          >> android/gradle.properties
 
-          grep -q \
-            "org.gradle.jvmargs" \
-            android/gradle.properties || \
-            echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" \
-            >> android/gradle.properties
+          echo \
+          "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" \
+          >> android/gradle.properties
 
-      # --------------------------------------------------
-      # 12. Restore SAME upload keystore
-      # --------------------------------------------------
       - name: Restore upload keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -275,11 +319,8 @@ jobs:
             exit 1
           }
 
-          echo "Upload keystore restored"
+          echo "Keystore restored successfully."
 
-      # --------------------------------------------------
-      # 13. Configure release signing
-      # --------------------------------------------------
       - name: Configure release signing
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -308,11 +349,10 @@ jobs:
           p = Path("android/app/build.gradle")
           text = p.read_text()
 
-          # Add release signing configuration
-          if "storeFile file('upload-keystore.jks')" not in text:
+          if "upload-keystore.jks" not in text:
               marker = "signingConfigs {"
 
-              release_block = """
+              block = """
                   release {
                       storeFile file('upload-keystore.jks')
                       storePassword System.getenv('KEYSTORE_PASSWORD')
@@ -321,18 +361,17 @@ jobs:
                   }
               """
 
-              if marker in text:
-                  text = text.replace(
-                      marker,
-                      marker + release_block,
-                      1
-                  )
-              else:
+              if marker not in text:
                   raise SystemExit(
-                      "ERROR: signingConfigs block not found"
+                      "ERROR: signingConfigs not found"
                   )
 
-          # Make release use upload key
+              text = text.replace(
+                  marker,
+                  marker + block,
+                  1
+              )
+
           text = text.replace(
               "signingConfig signingConfigs.debug",
               "signingConfig signingConfigs.release"
@@ -340,45 +379,24 @@ jobs:
 
           p.write_text(text)
 
-          print("Release signing configured")
+          print("Release signing configured.")
           PY
 
-      # --------------------------------------------------
-      # 14. Verify upload certificate
-      # --------------------------------------------------
-      - name: Verify upload certificate
+      - name: Verify signing certificate
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         shell: bash
         run: |
-          echo "===== UPLOAD CERTIFICATE ====="
-
           keytool -list -v \
             -keystore android/app/upload-keystore.jks \
             -storepass "$KEYSTORE_PASSWORD" \
             -alias "$KEY_ALIAS" \
             | grep -E \
-              "Alias name|Entry type|SHA1:|SHA-256:" \
+              "Alias name|SHA1:|SHA-256:" \
               || true
 
-          echo "=============================="
-
-      # --------------------------------------------------
-      # 15. Check Gradle
-      # --------------------------------------------------
-      - name: Check Gradle
-        shell: bash
-        run: |
-          cd android
-          chmod +x gradlew
-
-          ./gradlew --version
-
-      # --------------------------------------------------
-      # 16. Build AAB
-      # --------------------------------------------------
-      - name: Build Android Release AAB
+      - name: Build Android AAB
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -390,19 +408,14 @@ jobs:
 
           chmod +x gradlew
 
-          ./gradlew \
-            bundleRelease \
+          ./gradlew clean bundleRelease \
             --no-daemon \
-            --stacktrace \
-            --warning-mode all
+            --stacktrace
 
-      # --------------------------------------------------
-      # 17. Find AAB
-      # --------------------------------------------------
-      - name: Find generated AAB
+      - name: Find AAB
         shell: bash
         run: |
-          echo "===== AAB FILES ====="
+          echo "===== GENERATED AAB ====="
 
           find android \
             -type f \
@@ -415,20 +428,25 @@ jobs:
             | head -n 1)
 
           if [ -z "$AAB" ]; then
-            echo "ERROR: AAB was NOT generated"
+            echo "ERROR: AAB not generated."
             exit 1
           fi
 
           echo "AAB FOUND:"
           echo "$AAB"
 
-      # --------------------------------------------------
-      # 18. Upload AAB artifact
-      # --------------------------------------------------
-      - name: Upload AAB
+      - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
           name: vyapar-khata-aab-${{ github.run_number }}
           path: android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
           retention-days: 7
+
+      - name: Build complete
+        shell: bash
+        run: |
+          echo "================================"
+          echo "VYAPAR KHATA AAB BUILD COMPLETE"
+          echo "================================"
+          echo "Go to Actions -> this run -> Artifacts"

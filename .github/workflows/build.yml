@@ -1,3 +1,4 @@
+
 name: Build Vyapar Khata AAB
 
 on:
@@ -60,12 +61,12 @@ jobs:
           }
           EOF
 
-      - name: Install dependencies
+      - name: Install Dependencies
         shell: bash
         run: |
           npm install --legacy-peer-deps
 
-      - name: Create Babel config
+      - name: Create Babel Config
         shell: bash
         run: |
           cat > babel.config.js <<'EOF'
@@ -119,7 +120,7 @@ jobs:
           }
           EOF
 
-      - name: Expo prebuild
+      - name: Expo Prebuild
         shell: bash
         run: |
           npx expo prebuild \
@@ -127,8 +128,102 @@ jobs:
             --non-interactive \
             --clean
 
-      # FIX SPLASH SCREEN RESOURCE
-      - name: Fix Android Splash Resources
+      - name: Fix Kotlin Compatibility
+        shell: bash
+        run: |
+          echo "Applying Kotlin compatibility fix..."
+
+          cat >> android/gradle.properties <<'EOF'
+
+          # Kotlin compatibility
+          kotlin.code.style=official
+          android.useAndroidX=true
+          android.enableJetifier=true
+          EOF
+
+          # Force Kotlin 1.9.24
+          if [ -f android/build.gradle ]; then
+            python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("android/build.gradle")
+          text = path.read_text()
+
+          # Replace existing Kotlin plugin versions
+          import re
+
+          text = re.sub(
+              r'kotlinVersion\s*=\s*["\'][^"\']+["\']',
+              'kotlinVersion = "1.9.24"',
+              text
+          )
+
+          text = re.sub(
+              r'kotlin_version\s*=\s*["\'][^"\']+["\']',
+              'kotlin_version = "1.9.24"',
+              text
+          )
+
+          if 'kotlinVersion = "1.9.24"' not in text and \
+             'kotlin_version = "1.9.24"' not in text:
+
+              if 'ext {' in text:
+                  text = text.replace(
+                      'ext {',
+                      'ext {\n        kotlinVersion = "1.9.24"',
+                      1
+                  )
+              else:
+                  text = 'ext {\n    kotlinVersion = "1.9.24"\n}\n\n' + text
+
+          path.write_text(text)
+
+          print("Kotlin version configured.")
+          PY
+          fi
+
+      - name: Fix Expo Modules Kotlin Source
+        shell: bash
+        run: |
+          FILE="node_modules/expo-modules-core/android/src/main/java/expo/modules/adapters/react/permissions/PermissionsService.kt"
+
+          if [ -f "$FILE" ]; then
+            echo "Patching PermissionsService.kt..."
+
+            python3 <<'PY'
+          from pathlib import Path
+
+          path = Path(
+              "node_modules/expo-modules-core/android/src/main/java/expo/modules/adapters/react/permissions/PermissionsService.kt"
+          )
+
+          text = path.read_text()
+
+          old = "manifestPermissions.map { it }"
+
+          if old in text:
+              text = text.replace(
+                  old,
+                  "manifestPermissions?.map { it } ?: emptyArray()"
+              )
+
+          old2 = "manifestPermissions.map"
+
+          if old2 in text and "manifestPermissions?.map" not in text:
+              text = text.replace(
+                  old2,
+                  "manifestPermissions?.map"
+              )
+
+          path.write_text(text)
+
+          print("PermissionsService.kt patched.")
+          PY
+          else
+            echo "PermissionsService.kt not found - continuing."
+          fi
+
+      - name: Fix Android Splash Resource
         shell: bash
         run: |
           mkdir -p android/app/src/main/res/values
@@ -140,24 +235,6 @@ jobs:
           </resources>
           EOF
 
-          echo "Splash screen background resource created."
-
-      # Extra protection against generated splashscreen.xml
-      - name: Verify Splash Resources
-        shell: bash
-        run: |
-          echo "Checking splash resources..."
-
-          test -f android/app/src/main/res/values/splashscreen_background.xml
-
-          echo "Splash resource:"
-          cat android/app/src/main/res/values/splashscreen_background.xml
-
-          echo "Splash screen XML:"
-          if [ -f android/app/src/main/res/drawable/splashscreen.xml ]; then
-            cat android/app/src/main/res/drawable/splashscreen.xml
-          fi
-
       - name: Configure Android SDK 36
         shell: bash
         run: |
@@ -168,7 +245,7 @@ jobs:
           android.buildToolsVersion=36.0.0
           EOF
 
-      - name: Restore signing keystore
+      - name: Restore Signing Keystore
         shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -189,9 +266,9 @@ jobs:
           keyPassword=${KEY_PASSWORD}
           EOF
 
-          echo "Keystore restored successfully."
+          echo "Existing signing keystore restored."
 
-      - name: Configure release signing
+      - name: Configure Release Signing
         shell: bash
         run: |
           python3 <<'PY'
@@ -217,7 +294,7 @@ jobs:
 
               return -1
 
-          # Add keystore properties
+          # Add keystore properties loader
           if "keystorePropertiesFile" not in text:
               block = r'''
           def keystorePropertiesFile = rootProject.file("keystore.properties")
@@ -235,7 +312,6 @@ jobs:
                   1
               )
 
-          # Find android block
           android_pos = text.find("android {")
 
           if android_pos == -1:
@@ -243,7 +319,6 @@ jobs:
 
           android_end = find_block_end(text, android_pos)
 
-          # Find signingConfigs
           signing_pos = text.find(
               "signingConfigs {",
               android_pos,
@@ -251,7 +326,6 @@ jobs:
           )
 
           if signing_pos == -1:
-
               signing = r'''
               signingConfigs {
                   release {
@@ -272,40 +346,9 @@ jobs:
                   + text[insert_pos:]
               )
 
-          else:
-
-              signing_end = find_block_end(
-                  text,
-                  signing_pos
-              )
-
-              signing_block = text[
-                  signing_pos:signing_end
-              ]
-
-              if "release {" not in signing_block:
-
-                  release_signing = r'''
-                  release {
-                      storeFile file(keystoreProperties['storeFile'])
-                      storePassword keystoreProperties['storePassword']
-                      keyAlias keystoreProperties['keyAlias']
-                      keyPassword keystoreProperties['keyPassword']
-                  }
-              '''
-
-                  text = (
-                      text[:signing_end - 1]
-                      + release_signing
-                      + "\n"
-                      + text[signing_end - 1:]
-                  )
-
-          # Recalculate android block
           android_pos = text.find("android {")
           android_end = find_block_end(text, android_pos)
 
-          # Find buildTypes
           build_types_pos = text.find(
               "buildTypes {",
               android_pos,
@@ -313,9 +356,7 @@ jobs:
           )
 
           if build_types_pos == -1:
-              raise SystemExit(
-                  "ERROR: buildTypes block not found"
-              )
+              raise SystemExit("ERROR: buildTypes block not found")
 
           build_types_end = find_block_end(
               text,
@@ -326,7 +367,6 @@ jobs:
               build_types_pos:build_types_end
           ]
 
-          # Find release block
           release_relative = build_types_block.find(
               "release {"
           )
@@ -349,10 +389,7 @@ jobs:
 
               if "signingConfig signingConfigs.release" not in release_block:
 
-                  insert_pos = (
-                      release_pos
-                      + len("release {")
-                  )
+                  insert_pos = release_pos + len("release {")
 
                   text = (
                       text[:insert_pos]
@@ -380,7 +417,7 @@ jobs:
           print("Release signing configured successfully.")
           PY
 
-      - name: Verify Build Configuration
+      - name: Verify Configuration
         shell: bash
         run: |
           echo "======================================"
@@ -390,11 +427,16 @@ jobs:
           echo "Version Code : ${VERSION_CODE}"
           echo "======================================"
 
-          echo "Node:"
           node --version
-
-          echo "Java:"
           java -version
+
+          echo "Checking App.js..."
+          test -f App.js
+
+          echo "Checking Android project..."
+          test -d android
+
+          echo "Configuration OK."
 
       - name: Build Release AAB
         shell: bash
@@ -403,14 +445,22 @@ jobs:
 
           chmod +x gradlew
 
-          ./gradlew clean bundleRelease --no-daemon
+          ./gradlew clean bundleRelease \
+            --no-daemon \
+            --stacktrace
 
       - name: Check AAB
         shell: bash
         run: |
-          test -f android/app/build/outputs/bundle/release/app-release.aab
+          AAB="android/app/build/outputs/bundle/release/app-release.aab"
 
-          ls -lh android/app/build/outputs/bundle/release/app-release.aab
+          test -f "$AAB"
+
+          echo "======================================"
+          echo "AAB CREATED SUCCESSFULLY"
+          echo "======================================"
+
+          ls -lh "$AAB"
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4
@@ -423,10 +473,8 @@ jobs:
         shell: bash
         run: |
           echo "======================================"
-          echo "VYAPAR KHATA AAB BUILD SUCCESSFUL"
+          echo "VYAPAR KHATA BUILD SUCCESSFUL"
           echo "======================================"
           echo "Package      : ${PACKAGE_NAME}"
           echo "Version Code : ${VERSION_CODE}"
-          echo "AAB:"
-          ls -lh android/app/build/outputs/bundle/release/app-release.aab
           echo "======================================"

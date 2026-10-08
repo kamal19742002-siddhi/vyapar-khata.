@@ -13,26 +13,45 @@ jobs:
 
     steps:
 
+      # --------------------------------------------------
+      # 1. CHECKOUT
+      # --------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
+
+      # --------------------------------------------------
+      # 2. VERSION CODE
+      # --------------------------------------------------
       - name: Set Version Code
         run: |
           VERSION_CODE=$((5000 + GITHUB_RUN_NUMBER))
           echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
-          echo "Version Code: $VERSION_CODE"
+          echo "Using Version Code: $VERSION_CODE"
 
+
+      # --------------------------------------------------
+      # 3. NODE
+      # --------------------------------------------------
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
+
+      # --------------------------------------------------
+      # 4. JAVA
+      # --------------------------------------------------
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
+
+      # --------------------------------------------------
+      # 5. PACKAGE.JSON
+      # --------------------------------------------------
       - name: Create package.json
         run: |
           cat > package.json <<'EOF'
@@ -54,21 +73,34 @@ jobs:
           }
           EOF
 
+
+      # --------------------------------------------------
+      # 6. INSTALL
+      # --------------------------------------------------
       - name: Install Dependencies
         run: |
           npm install --legacy-peer-deps
 
+
+      # --------------------------------------------------
+      # 7. BABEL
+      # --------------------------------------------------
       - name: Create Babel Config
         run: |
           cat > babel.config.js <<'EOF'
           module.exports = function(api) {
             api.cache(true);
+
             return {
               presets: ["babel-preset-expo"]
             };
           };
           EOF
 
+
+      # --------------------------------------------------
+      # 8. INDEX
+      # --------------------------------------------------
       - name: Create index.js
         run: |
           cat > index.js <<'EOF'
@@ -78,6 +110,10 @@ jobs:
           registerRootComponent(App);
           EOF
 
+
+      # --------------------------------------------------
+      # 9. APP.JSON
+      # --------------------------------------------------
       - name: Create app.json
         run: |
           cat > app.json <<EOF
@@ -95,6 +131,10 @@ jobs:
           }
           EOF
 
+
+      # --------------------------------------------------
+      # 10. EXPO PREBUILD
+      # --------------------------------------------------
       - name: Expo Prebuild
         run: |
           npx expo prebuild \
@@ -102,6 +142,10 @@ jobs:
             --non-interactive \
             --clean
 
+
+      # --------------------------------------------------
+      # 11. SPLASH FIX
+      # --------------------------------------------------
       - name: Fix Splash Resource
         run: |
           mkdir -p android/app/src/main/res/values
@@ -113,6 +157,10 @@ jobs:
           </resources>
           EOF
 
+
+      # --------------------------------------------------
+      # 12. ANDROID SDK 36
+      # --------------------------------------------------
       - name: Configure Android SDK
         run: |
           cat >> android/gradle.properties <<'EOF'
@@ -122,110 +170,110 @@ jobs:
           android.buildToolsVersion=36.0.0
           EOF
 
+
+      # --------------------------------------------------
+      # 13. RESTORE EXISTING KEYSTORE
+      # --------------------------------------------------
       - name: Restore Existing Signing Key
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           mkdir -p android/app
 
-          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          echo "$KEYSTORE_BASE64" | base64 --decode \
+            > android/app/upload-keystore.jks
 
           test -s android/app/upload-keystore.jks
 
-          echo "Existing keystore restored."
+          echo "Existing keystore restored successfully."
 
-      - name: Configure Signing Directly
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      # --------------------------------------------------
+      # 14. CONFIGURE SIGNING
+      # --------------------------------------------------
+      # IMPORTANT:
+      # We remove ALL previous custom signing blocks first.
+      # Then we create exactly ONE vyaparRelease config.
+      # --------------------------------------------------
+      - name: Configure Signing
         run: |
           python3 <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("android/app/build.gradle")
           text = path.read_text()
 
-          # Remove any previous injected signing configuration.
-          start_marker = "// VYAPAR_SIGNING_START"
-          end_marker = "// VYAPAR_SIGNING_END"
+          # ---------------------------------------------
+          # Remove previous custom signing blocks
+          # ---------------------------------------------
 
-          while start_marker in text and end_marker in text:
-              start = text.index(start_marker)
-              end = text.index(end_marker, start) + len(end_marker)
-              text = text[:start] + text[end:]
-
-          # Remove references to broken signingConfigs.release.
-          text = text.replace(
-              "signingConfig signingConfigs.release",
-              ""
+          # Remove blocks marked by our previous scripts.
+          text = re.sub(
+              r'(?s)// VYAPAR_SIGNING_START.*?// VYAPAR_SIGNING_END',
+              '',
+              text
           )
 
-          signing_block = r'''
-          // VYAPAR_SIGNING_START
-          def vyaparKeystoreFile = file("upload-keystore.jks")
-          def vyaparStorePassword = System.getenv("KEYSTORE_PASSWORD")
-          def vyaparKeyAlias = System.getenv("KEY_ALIAS")
-          def vyaparKeyPassword = System.getenv("KEY_PASSWORD")
-          // VYAPAR_SIGNING_END
+          # Remove any existing vyaparRelease signing block.
+          pattern = r'''
+              signingConfigs
+              \s*\{
+              (?:
+                  (?!\n\s*\})
+                  .
+              )*?
+              vyaparRelease
+              (?:
+                  .
+              )*?
+              \}
           '''
 
-          text = signing_block + "\n" + text
+          text = re.sub(
+              pattern,
+              '',
+              text,
+              flags=re.VERBOSE | re.DOTALL
+          )
 
-          # Find android block.
-          android_start = text.find("android {")
+          # Remove direct references to old config.
+          text = re.sub(
+              r'\s*signingConfig\s+signingConfigs\.vyaparRelease',
+              '',
+              text
+          )
 
-          if android_start == -1:
-              raise SystemExit("android block not found")
+          text = re.sub(
+              r'\s*signingConfig\s+signingConfigs\.getByName\(["\']vyaparRelease["\']\)',
+              '',
+              text
+          )
 
-          # Find buildTypes.
-          build_types = text.find(
+          # ---------------------------------------------
+          # Find android block
+          # ---------------------------------------------
+
+          android_pos = text.find("android {")
+
+          if android_pos == -1:
+              raise SystemExit("ERROR: android block not found")
+
+          build_types_pos = text.find(
               "buildTypes {",
-              android_start
+              android_pos
           )
 
-          if build_types == -1:
-              raise SystemExit("buildTypes block not found")
+          if build_types_pos == -1:
+              raise SystemExit("ERROR: buildTypes block not found")
 
-          # Find release block.
-          release_pos = text.find(
-              "release {",
-              build_types
-          )
+          # ---------------------------------------------
+          # Add ONE signing config
+          # ---------------------------------------------
 
-          if release_pos == -1:
-              raise SystemExit("release block not found")
-
-          # Find closing brace for release block.
-          depth = 0
-          release_end = None
-          opened = False
-
-          for i in range(release_pos, len(text)):
-              if text[i] == "{":
-                  depth += 1
-                  opened = True
-              elif text[i] == "}":
-                  depth -= 1
-                  if opened and depth == 0:
-                      release_end = i
-                      break
-
-          if release_end is None:
-              raise SystemExit("Could not locate release block end")
-
-          signing_line = '''
-                  signingConfig signingConfigs.create("vyaparRelease")
-                  '''
-
-          # We don't rely on signingConfigs.release.
-          # Create a named signing config before buildTypes.
-          signing_config = '''
+          signing_block = '''
               signingConfigs {
-                  create("vyaparRelease") {
+                  vyaparRelease {
                       storeFile file("upload-keystore.jks")
                       storePassword System.getenv("KEYSTORE_PASSWORD")
                       keyAlias System.getenv("KEY_ALIAS")
@@ -235,92 +283,92 @@ jobs:
 
           '''
 
-          # Find existing signingConfigs inside android block.
-          existing_signing = text.find(
-              "signingConfigs {",
-              android_start,
-              build_types
+          text = (
+              text[:build_types_pos]
+              + signing_block
+              + text[build_types_pos:]
           )
 
-          if existing_signing != -1:
-              # Leave Expo's block untouched and add our own named config
-              # only if vyaparRelease does not already exist.
-              existing_end = existing_signing
-              depth = 0
-              opened = False
+          # ---------------------------------------------
+          # Find release block
+          # ---------------------------------------------
 
-              for i in range(existing_signing, len(text)):
-                  if text[i] == "{":
-                      depth += 1
-                      opened = True
-                  elif text[i] == "}":
-                      depth -= 1
-                      if opened and depth == 0:
-                          existing_end = i + 1
-                          break
+          build_types_pos = text.find(
+              "buildTypes {",
+              android_pos
+          )
 
-              existing_block = text[
-                  existing_signing:existing_end
-              ]
+          release_pos = text.find(
+              "release {",
+              build_types_pos
+          )
 
-              if "vyaparRelease" not in existing_block:
-                  text = (
-                      text[:existing_end]
-                      + "\n"
-                      + signing_config
-                      + text[existing_end:]
-                  )
+          if release_pos == -1:
+              raise SystemExit("ERROR: release block not found")
 
-          else:
-              text = (
-                  text[:build_types]
-                  + signing_config
-                  + text[build_types:]
+          # ---------------------------------------------
+          # Find release block ending
+          # ---------------------------------------------
+
+          depth = 0
+          opened = False
+          release_end = None
+
+          for i in range(release_pos, len(text)):
+
+              if text[i] == "{":
+                  depth += 1
+                  opened = True
+
+              elif text[i] == "}":
+                  depth -= 1
+
+                  if opened and depth == 0:
+                      release_end = i
+                      break
+
+          if release_end is None:
+              raise SystemExit(
+                  "ERROR: Could not find release block end"
               )
 
-              build_types = text.find(
-                  "buildTypes {",
-                  android_start
-              )
+          # ---------------------------------------------
+          # Add signing config to release
+          # ---------------------------------------------
 
-              release_pos = text.find(
-                  "release {",
-                  build_types
-              )
-
-              depth = 0
-              release_end = None
-              opened = False
-
-              for i in range(release_pos, len(text)):
-                  if text[i] == "{":
-                      depth += 1
-                      opened = True
-                  elif text[i] == "}":
-                      depth -= 1
-                      if opened and depth == 0:
-                          release_end = i
-                          break
-
-          # Add signing config to release block.
           release_content = text[
               release_pos:release_end
           ]
 
-          if "vyaparRelease" not in release_content:
-              insert_at = release_pos + len("release {")
+          if "signingConfig" not in release_content:
+
+              insert_position = (
+                  release_pos + len("release {")
+              )
+
               text = (
-                  text[:insert_at]
-                  + "\n"
-                  + signing_line
-                  + text[insert_at:]
+                  text[:insert_position]
+                  + '''
+                      signingConfig signingConfigs.vyaparRelease
+                  '''
+                  + text[insert_position:]
               )
 
           path.write_text(text)
 
-          print("Signing configuration created successfully.")
+          print("")
+          print("======================================")
+          print("SIGNING CONFIG CREATED")
+          print("======================================")
+          print("Config: vyaparRelease")
+          print("Keystore: upload-keystore.jks")
+          print("======================================")
           PY
 
+
+      # --------------------------------------------------
+      # 15. VERIFY SIGNING
+      # --------------------------------------------------
       - name: Verify Signing Configuration
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -331,14 +379,22 @@ jobs:
 
           test -f android/app/upload-keystore.jks
 
-          echo "Checking build.gradle..."
+          echo "Keystore exists."
 
-          grep -n "vyaparRelease" android/app/build.gradle || true
+          echo ""
+          echo "Signing configuration:"
+          grep -n "vyaparRelease" \
+            android/app/build.gradle || true
 
-          grep -n "signingConfig" android/app/build.gradle || true
+          echo ""
+          echo "Signing references:"
+          grep -n "signingConfig" \
+            android/app/build.gradle || true
 
-          echo "Signing configuration check completed."
 
+      # --------------------------------------------------
+      # 16. BUILD AAB
+      # --------------------------------------------------
       - name: Build Release AAB
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -353,15 +409,37 @@ jobs:
             --no-daemon \
             --stacktrace
 
+
+      # --------------------------------------------------
+      # 17. CHECK AAB
+      # --------------------------------------------------
       - name: Check AAB
         run: |
           AAB="android/app/build/outputs/bundle/release/app-release.aab"
 
           test -f "$AAB"
 
-          echo "AAB SUCCESS:"
+          echo ""
+          echo "======================================"
+          echo "AAB BUILD SUCCESS"
+          echo "======================================"
+
           ls -lh "$AAB"
 
+          echo ""
+          echo "Package:"
+          echo "${PACKAGE_NAME}"
+
+          echo ""
+          echo "Version Code:"
+          echo "${VERSION_CODE}"
+
+          echo "======================================"
+
+
+      # --------------------------------------------------
+      # 18. UPLOAD AAB ARTIFACT
+      # --------------------------------------------------
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
@@ -369,11 +447,21 @@ jobs:
           path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
 
+
+      # --------------------------------------------------
+      # 19. SUCCESS
+      # --------------------------------------------------
       - name: Build Successful
         run: |
+          echo ""
           echo "======================================"
           echo "VYAPAR KHATA AAB SUCCESSFUL"
           echo "======================================"
           echo "Package: ${PACKAGE_NAME}"
           echo "Version Code: ${VERSION_CODE}"
+          echo "AAB: app-release.aab"
           echo "======================================"
+```- SDK 36
+- AAB output `app-release.aab`
+
+सबसे महत्वपूर्ण: **पुराने build.yml का कोई हिस्सा साथ में न रखें**, खासकर पुराना `Configure Signing Directly` step।

@@ -296,9 +296,7 @@ jobs:
             --clean \
             --no-install
 
-            - name: Force Android SDK
-        shell: bash
-        run: |
+            - name: Force Android SDK|
           python3 <<'PY'
           from pathlib import Path
           import re

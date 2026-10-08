@@ -1,4 +1,3 @@
-
 name: Build Vyapar Khata AAB
 
 on:
@@ -13,32 +12,27 @@ jobs:
 
     steps:
 
-      # 1. Checkout
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Set unique version code
       - name: Set Version Code
         shell: bash
         run: |
           VERSION_CODE=$((5000 + GITHUB_RUN_NUMBER))
           echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
-          echo "Using Version Code: $VERSION_CODE"
+          echo "Version Code: $VERSION_CODE"
 
-      # 3. Setup Node
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      # 4. Setup Java 17
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      # 5. Create package.json
       - name: Create package.json
         shell: bash
         run: |
@@ -66,13 +60,11 @@ jobs:
           }
           EOF
 
-      # 6. Install dependencies
       - name: Install dependencies
         shell: bash
         run: |
           npm install --legacy-peer-deps
 
-      # 7. Create Babel config
       - name: Create Babel config
         shell: bash
         run: |
@@ -86,7 +78,6 @@ jobs:
           };
           EOF
 
-      # 8. Create React Native entry
       - name: Create index.js
         shell: bash
         run: |
@@ -97,7 +88,6 @@ jobs:
           registerRootComponent(App);
           EOF
 
-      # 9. Create Expo configuration
       - name: Create app.json
         shell: bash
         run: |
@@ -129,7 +119,6 @@ jobs:
           }
           EOF
 
-      # 10. Expo prebuild
       - name: Expo prebuild
         shell: bash
         run: |
@@ -138,7 +127,37 @@ jobs:
             --non-interactive \
             --clean
 
-      # 11. Configure Android SDK 36
+      # FIX SPLASH SCREEN RESOURCE
+      - name: Fix Android Splash Resources
+        shell: bash
+        run: |
+          mkdir -p android/app/src/main/res/values
+
+          cat > android/app/src/main/res/values/splashscreen_background.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="splashscreen_background">#FFFFFF</color>
+          </resources>
+          EOF
+
+          echo "Splash screen background resource created."
+
+      # Extra protection against generated splashscreen.xml
+      - name: Verify Splash Resources
+        shell: bash
+        run: |
+          echo "Checking splash resources..."
+
+          test -f android/app/src/main/res/values/splashscreen_background.xml
+
+          echo "Splash resource:"
+          cat android/app/src/main/res/values/splashscreen_background.xml
+
+          echo "Splash screen XML:"
+          if [ -f android/app/src/main/res/drawable/splashscreen.xml ]; then
+            cat android/app/src/main/res/drawable/splashscreen.xml
+          fi
+
       - name: Configure Android SDK 36
         shell: bash
         run: |
@@ -149,7 +168,6 @@ jobs:
           android.buildToolsVersion=36.0.0
           EOF
 
-      # 12. Restore existing signing keystore
       - name: Restore signing keystore
         shell: bash
         env:
@@ -162,6 +180,8 @@ jobs:
 
           echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
 
+          test -s android/app/upload-keystore.jks
+
           cat > android/keystore.properties <<EOF
           storeFile=upload-keystore.jks
           storePassword=${KEYSTORE_PASSWORD}
@@ -171,7 +191,6 @@ jobs:
 
           echo "Keystore restored successfully."
 
-      # 13. Configure release signing
       - name: Configure release signing
         shell: bash
         run: |
@@ -198,13 +217,9 @@ jobs:
 
               return -1
 
-          # -------------------------------------------------
-          # 1. Add keystore properties
-          # -------------------------------------------------
-
+          # Add keystore properties
           if "keystorePropertiesFile" not in text:
-
-              keystore_block = r'''
+              block = r'''
           def keystorePropertiesFile = rootProject.file("keystore.properties")
           def keystoreProperties = new Properties()
 
@@ -216,14 +231,11 @@ jobs:
 
               text = text.replace(
                   "android {",
-                  keystore_block + "android {",
+                  block + "android {",
                   1
               )
 
-          # -------------------------------------------------
-          # 2. Find android block
-          # -------------------------------------------------
-
+          # Find android block
           android_pos = text.find("android {")
 
           if android_pos == -1:
@@ -231,13 +243,7 @@ jobs:
 
           android_end = find_block_end(text, android_pos)
 
-          if android_end == -1:
-              raise SystemExit("ERROR: android block is invalid")
-
-          # -------------------------------------------------
-          # 3. Find / create signingConfigs
-          # -------------------------------------------------
-
+          # Find signingConfigs
           signing_pos = text.find(
               "signingConfigs {",
               android_pos,
@@ -246,7 +252,7 @@ jobs:
 
           if signing_pos == -1:
 
-              signing_block = r'''
+              signing = r'''
               signingConfigs {
                   release {
                       storeFile file(keystoreProperties['storeFile'])
@@ -262,20 +268,20 @@ jobs:
 
               text = (
                   text[:insert_pos]
-                  + signing_block
+                  + signing
                   + text[insert_pos:]
               )
 
           else:
 
-              signing_end = find_block_end(text, signing_pos)
+              signing_end = find_block_end(
+                  text,
+                  signing_pos
+              )
 
-              if signing_end == -1:
-                  raise SystemExit(
-                      "ERROR: signingConfigs block is invalid"
-                  )
-
-              signing_block = text[signing_pos:signing_end]
+              signing_block = text[
+                  signing_pos:signing_end
+              ]
 
               if "release {" not in signing_block:
 
@@ -295,18 +301,11 @@ jobs:
                       + text[signing_end - 1:]
                   )
 
-          # -------------------------------------------------
-          # 4. Recalculate android block
-          # -------------------------------------------------
-
+          # Recalculate android block
           android_pos = text.find("android {")
-
           android_end = find_block_end(text, android_pos)
 
-          # -------------------------------------------------
-          # 5. Find buildTypes
-          # -------------------------------------------------
-
+          # Find buildTypes
           build_types_pos = text.find(
               "buildTypes {",
               android_pos,
@@ -323,39 +322,26 @@ jobs:
               build_types_pos
           )
 
-          if build_types_end == -1:
-              raise SystemExit(
-                  "ERROR: buildTypes block is invalid"
-              )
-
           build_types_block = text[
               build_types_pos:build_types_end
           ]
 
-          # -------------------------------------------------
-          # 6. Find release inside buildTypes
-          # -------------------------------------------------
-
-          release_pos_relative = build_types_block.find(
+          # Find release block
+          release_relative = build_types_block.find(
               "release {"
           )
 
-          if release_pos_relative != -1:
+          if release_relative != -1:
 
               release_pos = (
                   build_types_pos
-                  + release_pos_relative
+                  + release_relative
               )
 
               release_end = find_block_end(
                   text,
                   release_pos
               )
-
-              if release_end == -1:
-                  raise SystemExit(
-                      "ERROR: release block is invalid"
-                  )
 
               release_block = text[
                   release_pos:release_end
@@ -391,26 +377,25 @@ jobs:
 
           path.write_text(text)
 
-          print(
-              "Release signing configuration completed successfully."
-          )
+          print("Release signing configured successfully.")
           PY
 
-      # 14. Verify configuration
-      - name: Verify build configuration
+      - name: Verify Build Configuration
         shell: bash
         run: |
           echo "======================================"
-          echo "Vyapar Khata Build Configuration"
+          echo "VYAPAR KHATA BUILD"
           echo "======================================"
-          echo "Package Name : ${PACKAGE_NAME}"
+          echo "Package      : ${PACKAGE_NAME}"
           echo "Version Code : ${VERSION_CODE}"
-          echo "Node         : $(node --version)"
-          echo "Java         :"
-          java -version
           echo "======================================"
 
-      # 15. Build AAB
+          echo "Node:"
+          node --version
+
+          echo "Java:"
+          java -version
+
       - name: Build Release AAB
         shell: bash
         run: |
@@ -420,7 +405,13 @@ jobs:
 
           ./gradlew clean bundleRelease --no-daemon
 
-      # 16. Upload AAB artifact
+      - name: Check AAB
+        shell: bash
+        run: |
+          test -f android/app/build/outputs/bundle/release/app-release.aab
+
+          ls -lh android/app/build/outputs/bundle/release/app-release.aab
+
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
@@ -428,15 +419,14 @@ jobs:
           path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
 
-      # 17. Final result
-      - name: Build completed
+      - name: Build Successful
         shell: bash
         run: |
           echo "======================================"
           echo "VYAPAR KHATA AAB BUILD SUCCESSFUL"
           echo "======================================"
-          echo "Package     : ${PACKAGE_NAME}"
-          echo "Version Code: ${VERSION_CODE}"
-          echo "AAB File:"
+          echo "Package      : ${PACKAGE_NAME}"
+          echo "Version Code : ${VERSION_CODE}"
+          echo "AAB:"
           ls -lh android/app/build/outputs/bundle/release/app-release.aab
           echo "======================================"

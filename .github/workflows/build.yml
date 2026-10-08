@@ -1,4 +1,3 @@
-
 name: Build Vyapar Khata AAB
 
 on:
@@ -28,7 +27,7 @@ jobs:
         run: |
           VERSION_CODE=$((5000 + GITHUB_RUN_NUMBER))
           echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
-          echo "Version Code: $VERSION_CODE"
+          echo "Using Version Code: $VERSION_CODE"
 
 
       # ============================================
@@ -51,7 +50,7 @@ jobs:
 
 
       # ============================================
-      # PACKAGE.JSON
+      # CREATE PACKAGE.JSON
       # ============================================
       - name: Create package.json
         run: |
@@ -76,7 +75,7 @@ jobs:
 
 
       # ============================================
-      # INSTALL
+      # INSTALL DEPENDENCIES
       # ============================================
       - name: Install Dependencies
         run: |
@@ -84,7 +83,7 @@ jobs:
 
 
       # ============================================
-      # BABEL
+      # BABEL CONFIG
       # ============================================
       - name: Create Babel Config
         run: |
@@ -100,7 +99,7 @@ jobs:
 
 
       # ============================================
-      # INDEX
+      # INDEX.JS
       # ============================================
       - name: Create index.js
         run: |
@@ -145,7 +144,7 @@ jobs:
 
 
       # ============================================
-      # SPLASH RESOURCE FIX
+      # SPLASH RESOURCE
       # ============================================
       - name: Fix Splash Resource
         run: |
@@ -185,13 +184,16 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 --decode \
             > android/app/upload-keystore.jks
 
-          test -s android/app/upload-keystore.jks
+          if [ ! -s android/app/upload-keystore.jks ]; then
+            echo "ERROR: Keystore was not restored."
+            exit 1
+          fi
 
-          echo "Existing signing keystore restored."
+          echo "Existing signing keystore restored successfully."
 
 
       # ============================================
-      # SIGNING CONFIG
+      # CONFIGURE SIGNING
       # ============================================
       - name: Configure Signing
         run: |
@@ -202,29 +204,29 @@ jobs:
           path = Path("android/app/build.gradle")
           text = path.read_text()
 
-          # Remove all previous custom signing blocks
+          # Remove our previous custom signing section only.
           text = re.sub(
               r'(?s)// VYAPAR_SIGNING_START.*?// VYAPAR_SIGNING_END',
               '',
               text
           )
 
-          # Remove previous vyaparRelease declarations
+          # Remove previously inserted custom signing config.
           text = re.sub(
-              r'(?s)signingConfigs\s*\{[^{}]*vyaparRelease\s*\{.*?\}\s*\}',
+              r'(?s)\n\s*vyaparRelease\s*\{\s*storeFile\s+file\("upload-keystore\.jks"\).*?\n\s*\}',
               '',
               text
           )
 
-          # Remove old references
+          # Remove previous release signing references.
           text = re.sub(
-              r'\s*signingConfig\s+signingConfigs\.vyaparRelease',
+              r'\n\s*signingConfig\s+signingConfigs\.vyaparRelease',
               '',
               text
           )
 
           text = re.sub(
-              r'\s*signingConfig\s+signingConfigs\.getByName\(["\']vyaparRelease["\']\)',
+              r'\n\s*signingConfig\s+signingConfigs\.getByName\(["\']vyaparRelease["\']\)',
               '',
               text
           )
@@ -232,18 +234,15 @@ jobs:
           android_pos = text.find("android {")
 
           if android_pos == -1:
-              raise SystemExit("android block not found")
+              raise SystemExit("ERROR: android block not found")
 
-          build_types_pos = text.find(
-              "buildTypes {",
-              android_pos
-          )
+          build_types_pos = text.find("buildTypes {", android_pos)
 
           if build_types_pos == -1:
-              raise SystemExit("buildTypes block not found")
+              raise SystemExit("ERROR: buildTypes block not found")
 
-          # Create exactly ONE signing config
           signing_block = '''
+              // VYAPAR_SIGNING_START
               signingConfigs {
                   vyaparRelease {
                       storeFile file("upload-keystore.jks")
@@ -252,6 +251,7 @@ jobs:
                       keyPassword System.getenv("KEY_PASSWORD")
                   }
               }
+              // VYAPAR_SIGNING_END
 
           '''
 
@@ -261,21 +261,13 @@ jobs:
               + text[build_types_pos:]
           )
 
-          # Find release block
-          build_types_pos = text.find(
-              "buildTypes {",
-              android_pos
-          )
-
-          release_pos = text.find(
-              "release {",
-              build_types_pos
-          )
+          # Find release block.
+          build_types_pos = text.find("buildTypes {", android_pos)
+          release_pos = text.find("release {", build_types_pos)
 
           if release_pos == -1:
-              raise SystemExit("release block not found")
+              raise SystemExit("ERROR: release block not found")
 
-          # Find end of release block
           depth = 0
           opened = False
           release_end = None
@@ -286,18 +278,16 @@ jobs:
                   opened = True
               elif text[i] == "}":
                   depth -= 1
+
                   if opened and depth == 0:
                       release_end = i
                       break
 
           if release_end is None:
-              raise SystemExit("release block end not found")
+              raise SystemExit("ERROR: release block end not found")
 
-          release_content = text[
-              release_pos:release_end
-          ]
+          release_content = text[release_pos:release_end]
 
-          # Add signing only once
           if "signingConfig" not in release_content:
               insert_at = release_pos + len("release {")
 
@@ -311,8 +301,25 @@ jobs:
 
           path.write_text(text)
 
-          print("Signing configuration prepared successfully.")
+          print("Signing configuration configured successfully.")
           PY
+
+
+      # ============================================
+      # VERIFY SIGNING CONFIG
+      # ============================================
+      - name: Verify Signing Configuration
+        run: |
+          echo "===== SIGNING CONFIG ====="
+
+          grep -n -A12 -B3 "VYAPAR_SIGNING_START" \
+            android/app/build.gradle || true
+
+          echo ""
+          echo "===== SIGNING REFERENCES ====="
+
+          grep -n "signingConfig" \
+            android/app/build.gradle || true
 
 
       # ============================================
@@ -322,93 +329,105 @@ jobs:
         run: |
           FILE="node_modules/expo-modules-core/android/src/main/java/expo/modules/adapters/react/permissions/PermissionsService.kt"
 
-          test -f "$FILE"
+          if [ ! -f "$FILE" ]; then
+            echo "ERROR: PermissionsService.kt not found"
+            exit 1
+          fi
 
-          echo "Checking PermissionsService.kt..."
+          echo "===== ORIGINAL FILE AREA ====="
+          nl -ba "$FILE" | sed -n '158,172p'
 
-          sed -n '155,175p' "$FILE"
-
-          python3 <<'PY'
+          python3 - "$FILE" <<'PY'
           from pathlib import Path
+          import sys
+          import re
 
-          path = Path(
-              "node_modules/expo-modules-core/android/src/main/java/expo/modules/adapters/react/permissions/PermissionsService.kt"
-          )
+          path = Path(sys.argv[1])
+          lines = path.read_text().splitlines()
 
-          text = path.read_text()
+          if len(lines) < 166:
+              raise SystemExit(
+                  "ERROR: PermissionsService.kt is shorter than 166 lines"
+              )
 
-          # Fix nullable package permission array issue.
-          replacements = [
+          index = 165
+          line = lines[index]
+
+          print("")
+          print("Original line 166:")
+          print(line)
+
+          # The actual compiler error is:
+          #
+          # Array<(out) String!>?
+          #
+          # Therefore the receiver on this line needs a Kotlin
+          # null-safety assertion.
+          #
+          # Patch only the first matching nullable-array operation
+          # on line 166.
+
+          patterns = [
               (
-                  "manifest.permissions.any { it == permission }",
-                  "manifest.permissions?.any { it == permission } == true"
+                  r'(\b[A-Za-z_][A-Za-z0-9_]*)\.contains\(',
+                  r'\1!!.contains('
               ),
               (
-                  "manifest.permissions.contains(permission)",
-                  "manifest.permissions?.contains(permission) == true"
+                  r'(\b[A-Za-z_][A-Za-z0-9_]*)\.any\s*\{',
+                  r'\1!!.any {'
               ),
               (
-                  "manifest.permissions.isNotEmpty()",
-                  "manifest.permissions?.isNotEmpty() == true"
+                  r'(\b[A-Za-z_][A-Za-z0-9_]*)\.indexOf\(',
+                  r'\1!!.indexOf('
               ),
               (
-                  "manifest.permissions.size",
-                  "manifest.permissions?.size ?: 0"
+                  r'(\b[A-Za-z_][A-Za-z0-9_]*)\.isEmpty\(\)',
+                  r'\1!!.isEmpty()'
+              ),
+              (
+                  r'(\b[A-Za-z_][A-Za-z0-9_]*)\.isNotEmpty\(\)',
+                  r'\1!!.isNotEmpty()'
               )
           ]
 
-          changed = False
+          patched = line
 
-          for old, new in replacements:
-              if old in text:
-                  text = text.replace(old, new)
-                  changed = True
-
-          path.write_text(text)
-
-          if changed:
-              print("Expo Modules Core Kotlin patch applied.")
-          else:
-              print(
-                  "Generic Kotlin expressions were not found; "
-                  "checking exact failing line."
+          for pattern, replacement in patterns:
+              candidate = re.sub(
+                  pattern,
+                  replacement,
+                  patched,
+                  count=1
               )
 
+              if candidate != patched:
+                  patched = candidate
+                  break
+
+          if patched == line:
+              print("")
+              print("ERROR: Could not identify the nullable-array call")
+              print("on line 166.")
+              print("")
+              print("The workflow will stop instead of modifying")
+              print("the wrong source code.")
+              raise SystemExit(1)
+
+          lines[index] = patched
+          path.write_text("\n".join(lines) + "\n")
+
+          print("")
+          print("Patched line 166:")
+          print(lines[index])
           PY
 
           echo ""
-          echo "PermissionsService.kt after patch:"
-          sed -n '155,175p' "$FILE"
+          echo "===== PATCHED FILE AREA ====="
+          nl -ba "$FILE" | sed -n '158,172p'
 
 
       # ============================================
-      # VERIFY SIGNING
-      # ============================================
-      - name: Verify Signing
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          echo "Checking keystore..."
-
-          test -f android/app/upload-keystore.jks
-
-          echo "Keystore OK."
-
-          echo ""
-          echo "Signing configuration:"
-          grep -n "vyaparRelease" \
-            android/app/build.gradle || true
-
-          echo ""
-          echo "Signing references:"
-          grep -n "signingConfig" \
-            android/app/build.gradle || true
-
-
-      # ============================================
-      # BUILD AAB
+      # BUILD RELEASE AAB
       # ============================================
       - name: Build Release AAB
         env:
@@ -433,20 +452,21 @@ jobs:
         run: |
           AAB="android/app/build/outputs/bundle/release/app-release.aab"
 
-          test -f "$AAB"
+          if [ ! -f "$AAB" ]; then
+            echo "ERROR: AAB was not created."
+            exit 1
+          fi
 
           echo ""
-          echo "======================================"
-          echo "AAB BUILD SUCCESS"
-          echo "======================================"
+          echo "=========================================="
+          echo "       VYAPAR KHATA AAB SUCCESS"
+          echo "=========================================="
+          echo "Package Name : ${PACKAGE_NAME}"
+          echo "Version Code : ${VERSION_CODE}"
+          echo "AAB File     : ${AAB}"
+          echo "=========================================="
 
           ls -lh "$AAB"
-
-          echo ""
-          echo "Package: ${PACKAGE_NAME}"
-          echo "Version Code: ${VERSION_CODE}"
-
-          echo "======================================"
 
 
       # ============================================
@@ -461,15 +481,15 @@ jobs:
 
 
       # ============================================
-      # FINAL SUCCESS
+      # FINAL
       # ============================================
       - name: Build Successful
         run: |
           echo ""
-          echo "======================================"
-          echo "VYAPAR KHATA AAB SUCCESSFUL"
-          echo "======================================"
-          echo "Package: ${PACKAGE_NAME}"
-          echo "Version Code: ${VERSION_CODE}"
-          echo "AAB: app-release.aab"
-          echo "======================================"
+          echo "=========================================="
+          echo "VYAPAR KHATA BUILD COMPLETED"
+          echo "=========================================="
+          echo "Package     : ${PACKAGE_NAME}"
+          echo "VersionCode : ${VERSION_CODE}"
+          echo "AAB         : app-release.aab"
+          echo "=========================================="

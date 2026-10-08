@@ -17,7 +17,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set Version Code
-        shell: bash
         run: |
           VERSION_CODE=$((5000 + GITHUB_RUN_NUMBER))
           echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
@@ -35,7 +34,6 @@ jobs:
           java-version: "17"
 
       - name: Create package.json
-        shell: bash
         run: |
           cat > package.json <<'EOF'
           {
@@ -43,14 +41,9 @@ jobs:
             "version": "2.0.0",
             "private": true,
             "main": "index.js",
-            "scripts": {
-              "start": "expo start",
-              "android": "expo run:android"
-            },
             "dependencies": {
               "@react-native-async-storage/async-storage": "1.23.1",
               "expo": "51.0.39",
-              "expo-contacts": "~13.0.5",
               "react": "18.2.0",
               "react-native": "0.74.5"
             },
@@ -62,35 +55,30 @@ jobs:
           EOF
 
       - name: Install Dependencies
-        shell: bash
         run: |
           npm install --legacy-peer-deps
 
       - name: Create Babel Config
-        shell: bash
         run: |
           cat > babel.config.js <<'EOF'
           module.exports = function(api) {
             api.cache(true);
-
             return {
-              presets: ['babel-preset-expo']
+              presets: ["babel-preset-expo"]
             };
           };
           EOF
 
       - name: Create index.js
-        shell: bash
         run: |
           cat > index.js <<'EOF'
-          import { registerRootComponent } from 'expo';
-          import App from './App';
+          import { registerRootComponent } from "expo";
+          import App from "./App";
 
           registerRootComponent(App);
           EOF
 
       - name: Create app.json
-        shell: bash
         run: |
           cat > app.json <<EOF
           {
@@ -99,132 +87,22 @@ jobs:
               "slug": "vyapar-khata",
               "version": "2.0.0",
               "orientation": "portrait",
-
               "android": {
                 "package": "${PACKAGE_NAME}",
-                "versionCode": ${VERSION_CODE},
-                "permissions": [
-                  "READ_CONTACTS"
-                ]
-              },
-
-              "plugins": [
-                [
-                  "expo-contacts",
-                  {
-                    "contactsPermission": "Allow Vyapar Khata to access your contacts so you can add customers and suppliers."
-                  }
-                ]
-              ]
+                "versionCode": ${VERSION_CODE}
+              }
             }
           }
           EOF
 
       - name: Expo Prebuild
-        shell: bash
         run: |
           npx expo prebuild \
             --platform android \
             --non-interactive \
             --clean
 
-      - name: Fix Kotlin Compatibility
-        shell: bash
-        run: |
-          echo "Applying Kotlin compatibility fix..."
-
-          cat >> android/gradle.properties <<'EOF'
-
-          # Kotlin compatibility
-          kotlin.code.style=official
-          android.useAndroidX=true
-          android.enableJetifier=true
-          EOF
-
-          # Force Kotlin 1.9.24
-          if [ -f android/build.gradle ]; then
-            python3 <<'PY'
-          from pathlib import Path
-
-          path = Path("android/build.gradle")
-          text = path.read_text()
-
-          # Replace existing Kotlin plugin versions
-          import re
-
-          text = re.sub(
-              r'kotlinVersion\s*=\s*["\'][^"\']+["\']',
-              'kotlinVersion = "1.9.24"',
-              text
-          )
-
-          text = re.sub(
-              r'kotlin_version\s*=\s*["\'][^"\']+["\']',
-              'kotlin_version = "1.9.24"',
-              text
-          )
-
-          if 'kotlinVersion = "1.9.24"' not in text and \
-             'kotlin_version = "1.9.24"' not in text:
-
-              if 'ext {' in text:
-                  text = text.replace(
-                      'ext {',
-                      'ext {\n        kotlinVersion = "1.9.24"',
-                      1
-                  )
-              else:
-                  text = 'ext {\n    kotlinVersion = "1.9.24"\n}\n\n' + text
-
-          path.write_text(text)
-
-          print("Kotlin version configured.")
-          PY
-          fi
-
-      - name: Fix Expo Modules Kotlin Source
-        shell: bash
-        run: |
-          FILE="node_modules/expo-modules-core/android/src/main/java/expo/modules/adapters/react/permissions/PermissionsService.kt"
-
-          if [ -f "$FILE" ]; then
-            echo "Patching PermissionsService.kt..."
-
-            python3 <<'PY'
-          from pathlib import Path
-
-          path = Path(
-              "node_modules/expo-modules-core/android/src/main/java/expo/modules/adapters/react/permissions/PermissionsService.kt"
-          )
-
-          text = path.read_text()
-
-          old = "manifestPermissions.map { it }"
-
-          if old in text:
-              text = text.replace(
-                  old,
-                  "manifestPermissions?.map { it } ?: emptyArray()"
-              )
-
-          old2 = "manifestPermissions.map"
-
-          if old2 in text and "manifestPermissions?.map" not in text:
-              text = text.replace(
-                  old2,
-                  "manifestPermissions?.map"
-              )
-
-          path.write_text(text)
-
-          print("PermissionsService.kt patched.")
-          PY
-          else
-            echo "PermissionsService.kt not found - continuing."
-          fi
-
-      - name: Fix Android Splash Resource
-        shell: bash
+      - name: Fix Splash Resource
         run: |
           mkdir -p android/app/src/main/res/values
 
@@ -235,8 +113,7 @@ jobs:
           </resources>
           EOF
 
-      - name: Configure Android SDK 36
-        shell: bash
+      - name: Configure Android SDK
         run: |
           cat >> android/gradle.properties <<'EOF'
 
@@ -245,8 +122,7 @@ jobs:
           android.buildToolsVersion=36.0.0
           EOF
 
-      - name: Restore Signing Keystore
-        shell: bash
+      - name: Restore Existing Signing Key
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -259,17 +135,13 @@ jobs:
 
           test -s android/app/upload-keystore.jks
 
-          cat > android/keystore.properties <<EOF
-          storeFile=upload-keystore.jks
-          storePassword=${KEYSTORE_PASSWORD}
-          keyAlias=${KEY_ALIAS}
-          keyPassword=${KEY_PASSWORD}
-          EOF
+          echo "Existing keystore restored."
 
-          echo "Existing signing keystore restored."
-
-      - name: Configure Release Signing
-        shell: bash
+      - name: Configure Signing Directly
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           python3 <<'PY'
           from pathlib import Path
@@ -277,169 +149,201 @@ jobs:
           path = Path("android/app/build.gradle")
           text = path.read_text()
 
-          def find_block_end(s, start):
-              depth = 0
-              opened = False
+          # Remove any previous injected signing configuration.
+          start_marker = "// VYAPAR_SIGNING_START"
+          end_marker = "// VYAPAR_SIGNING_END"
 
-              for i in range(start, len(s)):
-                  if s[i] == "{":
-                      depth += 1
-                      opened = True
+          while start_marker in text and end_marker in text:
+              start = text.index(start_marker)
+              end = text.index(end_marker, start) + len(end_marker)
+              text = text[:start] + text[end:]
 
-                  elif s[i] == "}":
-                      depth -= 1
-
-                      if opened and depth == 0:
-                          return i + 1
-
-              return -1
-
-          # Add keystore properties loader
-          if "keystorePropertiesFile" not in text:
-              block = r'''
-          def keystorePropertiesFile = rootProject.file("keystore.properties")
-          def keystoreProperties = new Properties()
-
-          if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-          }
-
-          '''
-
-              text = text.replace(
-                  "android {",
-                  block + "android {",
-                  1
-              )
-
-          android_pos = text.find("android {")
-
-          if android_pos == -1:
-              raise SystemExit("ERROR: android block not found")
-
-          android_end = find_block_end(text, android_pos)
-
-          signing_pos = text.find(
-              "signingConfigs {",
-              android_pos,
-              android_end
+          # Remove references to broken signingConfigs.release.
+          text = text.replace(
+              "signingConfig signingConfigs.release",
+              ""
           )
 
-          if signing_pos == -1:
-              signing = r'''
+          signing_block = r'''
+          // VYAPAR_SIGNING_START
+          def vyaparKeystoreFile = file("upload-keystore.jks")
+          def vyaparStorePassword = System.getenv("KEYSTORE_PASSWORD")
+          def vyaparKeyAlias = System.getenv("KEY_ALIAS")
+          def vyaparKeyPassword = System.getenv("KEY_PASSWORD")
+          // VYAPAR_SIGNING_END
+          '''
+
+          text = signing_block + "\n" + text
+
+          # Find android block.
+          android_start = text.find("android {")
+
+          if android_start == -1:
+              raise SystemExit("android block not found")
+
+          # Find buildTypes.
+          build_types = text.find(
+              "buildTypes {",
+              android_start
+          )
+
+          if build_types == -1:
+              raise SystemExit("buildTypes block not found")
+
+          # Find release block.
+          release_pos = text.find(
+              "release {",
+              build_types
+          )
+
+          if release_pos == -1:
+              raise SystemExit("release block not found")
+
+          # Find closing brace for release block.
+          depth = 0
+          release_end = None
+          opened = False
+
+          for i in range(release_pos, len(text)):
+              if text[i] == "{":
+                  depth += 1
+                  opened = True
+              elif text[i] == "}":
+                  depth -= 1
+                  if opened and depth == 0:
+                      release_end = i
+                      break
+
+          if release_end is None:
+              raise SystemExit("Could not locate release block end")
+
+          signing_line = '''
+                  signingConfig signingConfigs.create("vyaparRelease")
+                  '''
+
+          # We don't rely on signingConfigs.release.
+          # Create a named signing config before buildTypes.
+          signing_config = '''
               signingConfigs {
-                  release {
-                      storeFile file(keystoreProperties['storeFile'])
-                      storePassword keystoreProperties['storePassword']
-                      keyAlias keystoreProperties['keyAlias']
-                      keyPassword keystoreProperties['keyPassword']
+                  create("vyaparRelease") {
+                      storeFile file("upload-keystore.jks")
+                      storePassword System.getenv("KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("KEY_ALIAS")
+                      keyPassword System.getenv("KEY_PASSWORD")
                   }
               }
 
           '''
 
-              insert_pos = android_pos + len("android {")
-
-              text = (
-                  text[:insert_pos]
-                  + signing
-                  + text[insert_pos:]
-              )
-
-          android_pos = text.find("android {")
-          android_end = find_block_end(text, android_pos)
-
-          build_types_pos = text.find(
-              "buildTypes {",
-              android_pos,
-              android_end
+          # Find existing signingConfigs inside android block.
+          existing_signing = text.find(
+              "signingConfigs {",
+              android_start,
+              build_types
           )
 
-          if build_types_pos == -1:
-              raise SystemExit("ERROR: buildTypes block not found")
+          if existing_signing != -1:
+              # Leave Expo's block untouched and add our own named config
+              # only if vyaparRelease does not already exist.
+              existing_end = existing_signing
+              depth = 0
+              opened = False
 
-          build_types_end = find_block_end(
-              text,
-              build_types_pos
-          )
+              for i in range(existing_signing, len(text)):
+                  if text[i] == "{":
+                      depth += 1
+                      opened = True
+                  elif text[i] == "}":
+                      depth -= 1
+                      if opened and depth == 0:
+                          existing_end = i + 1
+                          break
 
-          build_types_block = text[
-              build_types_pos:build_types_end
-          ]
-
-          release_relative = build_types_block.find(
-              "release {"
-          )
-
-          if release_relative != -1:
-
-              release_pos = (
-                  build_types_pos
-                  + release_relative
-              )
-
-              release_end = find_block_end(
-                  text,
-                  release_pos
-              )
-
-              release_block = text[
-                  release_pos:release_end
+              existing_block = text[
+                  existing_signing:existing_end
               ]
 
-              if "signingConfig signingConfigs.release" not in release_block:
-
-                  insert_pos = release_pos + len("release {")
-
+              if "vyaparRelease" not in existing_block:
                   text = (
-                      text[:insert_pos]
-                      + "\n            signingConfig signingConfigs.release"
-                      + text[insert_pos:]
+                      text[:existing_end]
+                      + "\n"
+                      + signing_config
+                      + text[existing_end:]
                   )
 
           else:
-
-              release_block = r'''
-                  release {
-                      signingConfig signingConfigs.release
-                  }
-              '''
-
               text = (
-                  text[:build_types_end - 1]
-                  + release_block
+                  text[:build_types]
+                  + signing_config
+                  + text[build_types:]
+              )
+
+              build_types = text.find(
+                  "buildTypes {",
+                  android_start
+              )
+
+              release_pos = text.find(
+                  "release {",
+                  build_types
+              )
+
+              depth = 0
+              release_end = None
+              opened = False
+
+              for i in range(release_pos, len(text)):
+                  if text[i] == "{":
+                      depth += 1
+                      opened = True
+                  elif text[i] == "}":
+                      depth -= 1
+                      if opened and depth == 0:
+                          release_end = i
+                          break
+
+          # Add signing config to release block.
+          release_content = text[
+              release_pos:release_end
+          ]
+
+          if "vyaparRelease" not in release_content:
+              insert_at = release_pos + len("release {")
+              text = (
+                  text[:insert_at]
                   + "\n"
-                  + text[build_types_end - 1:]
+                  + signing_line
+                  + text[insert_at:]
               )
 
           path.write_text(text)
 
-          print("Release signing configured successfully.")
+          print("Signing configuration created successfully.")
           PY
 
-      - name: Verify Configuration
-        shell: bash
+      - name: Verify Signing Configuration
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          echo "======================================"
-          echo "VYAPAR KHATA BUILD"
-          echo "======================================"
-          echo "Package      : ${PACKAGE_NAME}"
-          echo "Version Code : ${VERSION_CODE}"
-          echo "======================================"
+          echo "Checking keystore..."
 
-          node --version
-          java -version
+          test -f android/app/upload-keystore.jks
 
-          echo "Checking App.js..."
-          test -f App.js
+          echo "Checking build.gradle..."
 
-          echo "Checking Android project..."
-          test -d android
+          grep -n "vyaparRelease" android/app/build.gradle || true
 
-          echo "Configuration OK."
+          grep -n "signingConfig" android/app/build.gradle || true
+
+          echo "Signing configuration check completed."
 
       - name: Build Release AAB
-        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           cd android
 
@@ -450,16 +354,12 @@ jobs:
             --stacktrace
 
       - name: Check AAB
-        shell: bash
         run: |
           AAB="android/app/build/outputs/bundle/release/app-release.aab"
 
           test -f "$AAB"
 
-          echo "======================================"
-          echo "AAB CREATED SUCCESSFULLY"
-          echo "======================================"
-
+          echo "AAB SUCCESS:"
           ls -lh "$AAB"
 
       - name: Upload AAB
@@ -470,11 +370,10 @@ jobs:
           if-no-files-found: error
 
       - name: Build Successful
-        shell: bash
         run: |
           echo "======================================"
-          echo "VYAPAR KHATA BUILD SUCCESSFUL"
+          echo "VYAPAR KHATA AAB SUCCESSFUL"
           echo "======================================"
-          echo "Package      : ${PACKAGE_NAME}"
-          echo "Version Code : ${VERSION_CODE}"
+          echo "Package: ${PACKAGE_NAME}"
+          echo "Version Code: ${VERSION_CODE}"
           echo "======================================"

@@ -296,111 +296,58 @@ jobs:
             --clean \
             --no-install
 
-      - name: Force Android SDK
+            - name: Force Android SDK
         shell: bash
         run: |
           python3 <<'PY'
           from pathlib import Path
           import re
 
-          p = Path(
-              "android/app/build.gradle"
-          )
-
+          p = Path("android/app/build.gradle")
           text = p.read_text()
 
-          text = re.sub(
-              r'minSdkVersion\s*=?\s*\d+',
-              'minSdkVersion 24',
-              text
-          )
-
-          text = re.sub(
-              r'minSdk\s*=?\s*\d+',
-              'minSdk 24',
-              text
-          )
-
-          text = re.sub(
-              r'compileSdkVersion\s*=?\s*\d+',
-              'compileSdkVersion 36',
-              text
-          )
-
-          text = re.sub(
-              r'compileSdk\s*=?\s*\d+',
-              'compileSdk 36',
-              text
-          )
-
-          text = re.sub(
-              r'targetSdkVersion\s*=?\s*\d+',
-              'targetSdkVersion 36',
-              text
-          )
-
-          text = re.sub(
-              r'targetSdk\s*=?\s*\d+',
-              'targetSdk 36',
-              text
-          )
+          text = re.sub(r'minSdkVersion\s*=?\s*\d+', 'minSdkVersion 24', text)
+          text = re.sub(r'minSdk\s*=?\s*\d+', 'minSdk 24', text)
+          text = re.sub(r'compileSdkVersion\s*=?\s*\d+', 'compileSdkVersion 36', text)
+          text = re.sub(r'compileSdk\s*=?\s*\d+', 'compileSdk 36', text)
+          text = re.sub(r'targetSdkVersion\s*=?\s*\d+', 'targetSdkVersion 36', text)
+          text = re.sub(r'targetSdk\s*=?\s*\d+', 'targetSdk 36', text)
 
           p.write_text(text)
 
-          gp = Path(
-              "android/gradle.properties"
-          )
-
-          existing = ""
-
-          if gp.exists():
-              existing = gp.read_text()
+          gp = Path("android/gradle.properties")
+          existing = gp.read_text() if gp.exists() else ""
 
           lines = []
 
           for line in existing.splitlines():
-              if line.startswith(
-                  "android.minSdkVersion="
-              ):
+              if line.startswith("android.minSdkVersion="):
                   continue
-
-              if line.startswith(
-                  "android.suppressUnsupportedCompileSdk="
-              ):
+              if line.startswith("android.compileSdkVersion="):
                   continue
-
+              if line.startswith("android.targetSdkVersion="):
+                  continue
+              if line.startswith("android.suppressUnsupportedCompileSdk="):
+                  continue
               lines.append(line)
 
-          lines.append(
-              "android.minSdkVersion=24"
-          )
+          lines.append("android.minSdkVersion=24")
+          lines.append("android.compileSdkVersion=36")
+          lines.append("android.targetSdkVersion=36")
+          lines.append("android.suppressUnsupportedCompileSdk=36")
 
-          lines.append(
-              "android.suppressUnsupportedCompileSdk=36"
-          )
-          echo "===== FINAL SDK VALUES ====="
-          grep -RniE "compileSdk|targetSdk" android/app android/gradle.properties || true
-          if not any(
-              x.startswith(
-                  "org.gradle.jvmargs="
-              )
-              for x in lines
-          ):
-              lines.append(
-                  "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m"
-              )
+          if not any(x.startswith("org.gradle.jvmargs=") for x in lines):
+              lines.append("org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m")
 
-          gp.write_text(
-              "\n".join(lines) + "\n"
-          )
+          gp.write_text("\n".join(lines) + "\n")
 
-          print(
-              "Android SDK configuration completed."
-          )
+          print("Android SDK configuration completed.")
           PY
 
-          echo "===== SDK CHECK ====="
+          echo "===== FINAL SDK VALUES ====="
+          grep -RniE "compileSdk|targetSdk" android/app android/gradle.properties || true
 
+          echo "===== SDK CHECK ====="
           grep -RniE \
             "minSdkVersion|minSdk|compileSdkVersion|compileSdk|targetSdkVersion|targetSdk" \
             android/app \

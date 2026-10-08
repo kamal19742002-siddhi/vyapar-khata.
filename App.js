@@ -1,291 +1,1136 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
+  Linking,
+  Modal,
+  Pressable,
   SafeAreaView,
-  View,
+  ScrollView,
+  Share,
+  StatusBar,
+  StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-  Alert,
-  Modal,
-  Linking,
-  Platform,
-  ActivityIndicator,
+  View,
 } from "react-native";
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Contacts from "expo-contacts";
 
-const DATA_KEY = "@vyapar_khata_data_v4";
-const BACKUP_KEY = "@vyapar_khata_backup_v4";
-const PIN_KEY = "@vyapar_khata_pin_v4";
+const DATA_KEY = "@vyapar_khata_advanced_v1";
+const PIN_KEY = "@vyapar_khata_pin_advanced_v1";
 
 const EMPTY = {
   business: {
-    name: "Vyapar Khata",
+    name: "My Business",
+    owner: "",
     phone: "",
-    address: "",
-    gst: "",
-    state: "",
+    upi: "",
+    gstin: "",
   },
+
   customers: [],
   suppliers: [],
   products: [],
   transactions: [],
   expenses: [],
-  invoices: [],
-  estimates: [],
 };
 
 const money = (n) =>
-  "₹" + (Number(n) || 0).toLocaleString("en-IN");
+  "₹" + Number(n || 0).toLocaleString("en-IN", {
+    maximumFractionDigits: 2,
+  });
 
-const num = (v) => {
-  const n = Number(String(v ?? "").replace(/,/g, ""));
-  return Number.isFinite(n) ? n : 0;
-};
+const id = () =>
+  Date.now().toString() + Math.random().toString(36).slice(2, 8);
 
-const today = () => {
-  const d = new Date();
-  return (
-    String(d.getDate()).padStart(2, "0") +
-    "/" +
-    String(d.getMonth() + 1).padStart(2, "0") +
-    "/" +
-    d.getFullYear()
-  );
-};
+const today = () => new Date().toISOString().slice(0, 10);
 
-const uid = (p) =>
-  p + "_" + Date.now() + "_" + Math.random().toString(36).slice(2);
-
-function normalize(x) {
-  x = x || {};
-  return {
-    ...EMPTY,
-    ...x,
-    business: { ...EMPTY.business, ...(x.business || {}) },
-    customers: Array.isArray(x.customers) ? x.customers : [],
-    suppliers: Array.isArray(x.suppliers) ? x.suppliers : [],
-    products: Array.isArray(x.products) ? x.products : [],
-    transactions: Array.isArray(x.transactions) ? x.transactions : [],
-    expenses: Array.isArray(x.expenses) ? x.expenses : [],
-    invoices: Array.isArray(x.invoices) ? x.invoices : [],
-    estimates: Array.isArray(x.estimates) ? x.estimates : [],
-  };
-}
-
-function transactionTitle(type) {
-  const map = {
-    received: "Payment Received",
-    given: "Payment Given",
-    sale: "Credit / Sale",
-    purchase: "Purchase",
-  };
-  return map[type] || "Transaction";
-}
-
-export default function App() {
+function App() {
   const [data, setData] = useState(EMPTY);
-  const [ready, setReady] = useState(false);
-
-  const [page, setPage] = useState("home");
-  const [tab, setTab] = useState("customers");
-  const [search, setSearch] = useState("");
-
-  const [modal, setModal] = useState("");
-  const [form, setForm] = useState({});
-  const [selected, setSelected] = useState(null);
-
+  const [loaded, setLoaded] = useState(false);
+  const [screen, setScreen] = useState("home");
+  const [modal, setModal] = useState(null);
   const [pin, setPin] = useState("");
   const [savedPin, setSavedPin] = useState("");
-  const [locked, setLocked] = useState(false);
 
   useEffect(() => {
-    load();
+    loadData();
   }, []);
 
-  async function load() {
+  async function loadData() {
     try {
-      const [main, backup, p] = await Promise.all([
-        AsyncStorage.getItem(DATA_KEY),
-        AsyncStorage.getItem(BACKUP_KEY),
-        AsyncStorage.getItem(PIN_KEY),
-      ]);
+      const d = await AsyncStorage.getItem(DATA_KEY);
+      const p = await AsyncStorage.getItem(PIN_KEY);
 
-      let result = null;
-
-      try {
-        if (main) result = normalize(JSON.parse(main));
-      } catch {}
-
-      let backupResult = null;
-
-      try {
-        if (backup) backupResult = normalize(JSON.parse(backup));
-      } catch {}
-
-      if (
-        backupResult &&
-        !(
-          result?.customers?.length ||
-          result?.suppliers?.length ||
-          result?.transactions?.length ||
-          result?.products?.length ||
-          result?.invoices?.length
-        )
-      ) {
-        result = backupResult;
+      if (d) {
+        setData({
+          ...EMPTY,
+          ...JSON.parse(d),
+        });
       }
 
-      setData(result || EMPTY);
-
-      if (p) {
-        setSavedPin(p);
-        setLocked(true);
-      }
+      if (p) setSavedPin(p);
     } catch (e) {
-      console.log(e);
+      Alert.alert("Error", "Data load nahi ho paya.");
     }
 
-    setReady(true);
+    setLoaded(true);
   }
 
-  async function save(next) {
-    const json = JSON.stringify(next);
+  async function saveData(next) {
+    setData(next);
+    await AsyncStorage.setItem(DATA_KEY, JSON.stringify(next));
+  }
 
-    try {
-      await AsyncStorage.setItem(DATA_KEY, json);
-      await AsyncStorage.setItem(BACKUP_KEY, json);
-    } catch (e) {
-      Alert.alert("Storage", "Data save nahi ho saka.");
+  if (!loaded) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text style={styles.logo}>Vyapar Khata</Text>
+        <Text>Loading...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (savedPin && pin !== savedPin) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text style={styles.logo}>Vyapar Khata</Text>
+        <Text style={styles.subtitle}>Enter PIN</Text>
+
+        <TextInput
+          value={pin}
+          onChangeText={setPin}
+          keyboardType="number-pad"
+          secureTextEntry
+          maxLength={6}
+          style={styles.pinInput}
+          placeholder="PIN"
+        />
+
+        <Pressable style={styles.primary} onPress={() => {}}>
+          <Text style={styles.primaryText}>Unlock</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
+
+  const totals = calculateTotals(data);
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.headerTitle}>
+            {data.business.name || "Vyapar Khata"}
+          </Text>
+          <Text style={styles.headerSub}>Smart Business Dashboard</Text>
+        </View>
+
+        <Pressable
+          style={styles.iconButton}
+          onPress={() => setModal("business")}
+        >
+          <Text>⚙️</Text>
+        </Pressable>
+      </View>
+
+      {screen === "home" && (
+        <Home
+          data={data}
+          totals={totals}
+          go={setScreen}
+          setModal={setModal}
+        />
+      )}
+
+      {screen === "khata" && (
+        <Khata
+          data={data}
+          saveData={saveData}
+          setModal={setModal}
+        />
+      )}
+
+      {screen === "products" && (
+        <Products
+          data={data}
+          saveData={saveData}
+          setModal={setModal}
+        />
+      )}
+
+      {screen === "transactions" && (
+        <Transactions
+          data={data}
+          totals={totals}
+          saveData={saveData}
+        />
+      )}
+
+      {screen === "reports" && (
+        <Reports data={data} totals={totals} />
+      )}
+
+      {screen === "smart" && (
+        <SmartAdvisor
+          data={data}
+          totals={totals}
+          go={setScreen}
+        />
+      )}
+
+      <View style={styles.bottom}>
+        <Bottom
+          current={screen}
+          setScreen={setScreen}
+        />
+      </View>
+
+      {modal === "business" && (
+        <BusinessModal
+          data={data}
+          saveData={saveData}
+          close={() => setModal(null)}
+        />
+      )}
+
+      {modal === "party" && (
+        <PartyModal
+          data={data}
+          saveData={saveData}
+          close={() => setModal(null)}
+        />
+      )}
+
+      {modal === "transaction" && (
+        <TransactionModal
+          data={data}
+          saveData={saveData}
+          close={() => setModal(null)}
+        />
+      )}
+
+      {modal === "product" && (
+        <ProductModal
+          data={data}
+          saveData={saveData}
+          close={() => setModal(null)}
+        />
+      )}
+    </SafeAreaView>
+  );
+}
+
+/* =========================================================
+   CALCULATIONS
+========================================================= */
+
+function calculateTotals(data) {
+  let sales = 0;
+  let purchases = 0;
+  let received = 0;
+  let given = 0;
+  let expenses = 0;
+  let profit = 0;
+
+  data.transactions.forEach((t) => {
+    const amount = Number(t.amount || 0);
+
+    if (t.type === "sale") sales += amount;
+    if (t.type === "purchase") purchases += amount;
+    if (t.type === "received") received += amount;
+    if (t.type === "given") given += amount;
+  });
+
+  data.expenses.forEach((e) => {
+    expenses += Number(e.amount || 0);
+  });
+
+  profit = sales - purchases - expenses;
+
+  return {
+    sales,
+    purchases,
+    received,
+    given,
+    expenses,
+    profit,
+    cash: received - given - expenses,
+  };
+}
+
+function getPartyBalance(data, partyId) {
+  let balance = 0;
+
+  data.transactions.forEach((t) => {
+    if (t.partyId !== partyId) return;
+
+    const amount = Number(t.amount || 0);
+
+    if (
+      t.type === "sale" ||
+      t.type === "given"
+    ) {
+      balance += amount;
     }
-  }
 
-  function update(fn) {
-    setData((old) => {
-      const next =
-        typeof fn === "function" ? fn(old) : fn;
+    if (
+      t.type === "received" ||
+      t.type === "purchase"
+    ) {
+      balance -= amount;
+    }
+  });
 
-      save(next);
-      return next;
+  return balance;
+}
+
+function getStockValue(data) {
+  return data.products.reduce(
+    (sum, p) =>
+      sum +
+      Number(p.stock || 0) * Number(p.cost || 0),
+    0
+  );
+}
+
+function healthScore(data, totals) {
+  let score = 60;
+
+  if (totals.profit > 0) score += 15;
+  else score -= 15;
+
+  if (totals.received >= totals.given) score += 10;
+  else score -= 10;
+
+  const lowStock = data.products.filter(
+    (p) => Number(p.stock || 0) <= Number(p.minStock || 0)
+  ).length;
+
+  if (lowStock === 0) score += 10;
+  else score -= Math.min(10, lowStock * 2);
+
+  if (data.customers.length > 0) score += 5;
+
+  return Math.max(0, Math.min(100, score));
+}
+
+/* =========================================================
+   HOME
+========================================================= */
+
+function Home({ data, totals, go, setModal }) {
+  const score = healthScore(data, totals);
+
+  const pendingCustomers = data.customers
+    .map((c) => ({
+      ...c,
+      balance: getPartyBalance(data, c.id),
+    }))
+    .filter((c) => c.balance > 0)
+    .sort((a, b) => b.balance - a.balance);
+
+  const lowStock = data.products.filter(
+    (p) =>
+      Number(p.stock || 0) <= Number(p.minStock || 0)
+  );
+
+  return (
+    <ScrollView contentContainerStyle={styles.content}>
+      <View style={styles.hero}>
+        <View>
+          <Text style={styles.heroSmall}>
+            BUSINESS HEALTH
+          </Text>
+
+          <Text style={styles.score}>
+            {score}/100
+          </Text>
+
+          <Text style={styles.heroText}>
+            {score >= 75
+              ? "Business is looking strong 🚀"
+              : score >= 50
+              ? "Business needs attention"
+              : "Some areas need action"}
+          </Text>
+        </View>
+
+        <Text style={styles.heroEmoji}>
+          {score >= 75 ? "🟢" : score >= 50 ? "🟡" : "🔴"}
+        </Text>
+      </View>
+
+      <View style={styles.grid}>
+        <Stat title="Sales" value={money(totals.sales)} />
+        <Stat title="Purchase" value={money(totals.purchases)} />
+        <Stat title="Expenses" value={money(totals.expenses)} />
+        <Stat
+          title="Profit"
+          value={money(totals.profit)}
+          positive={totals.profit >= 0}
+        />
+      </View>
+
+      <SectionTitle title="Quick Actions" />
+
+      <View style={styles.grid}>
+        <Action
+          icon="👤"
+          title="Add Customer"
+          onPress={() => setModal("party")}
+        />
+
+        <Action
+          icon="💰"
+          title="Payment"
+          onPress={() => setModal("transaction")}
+        />
+
+        <Action
+          icon="📦"
+          title="Add Product"
+          onPress={() => setModal("product")}
+        />
+
+        <Action
+          icon="🧠"
+          title="AI Advisor"
+          onPress={() => go("smart")}
+        />
+      </View>
+
+      <SectionTitle title="Smart Alerts" />
+
+      {pendingCustomers.length > 0 && (
+        <Card>
+          <Text style={styles.cardTitle}>
+            🔴 Payment Collection
+          </Text>
+
+          <Text style={styles.cardText}>
+            {pendingCustomers.length} customer(s) owe you{" "}
+            {money(
+              pendingCustomers.reduce(
+                (s, x) => s + x.balance,
+                0
+              )
+            )}
+          </Text>
+
+          <Pressable
+            style={styles.smallButton}
+            onPress={() => go("khata")}
+          >
+            <Text style={styles.smallButtonText}>
+              View Dues
+            </Text>
+          </Pressable>
+        </Card>
+      )}
+
+      {lowStock.length > 0 && (
+        <Card>
+          <Text style={styles.cardTitle}>
+            📦 Low Stock Alert
+          </Text>
+
+          <Text style={styles.cardText}>
+            {lowStock.length} product(s) need restocking.
+          </Text>
+
+          <Pressable
+            style={styles.smallButton}
+            onPress={() => go("products")}
+          >
+            <Text style={styles.smallButtonText}>
+              Check Stock
+            </Text>
+          </Pressable>
+        </Card>
+      )}
+
+      <Card>
+        <Text style={styles.cardTitle}>
+          🧠 Today's Business Advice
+        </Text>
+
+        <Text style={styles.cardText}>
+          {totals.profit > 0
+            ? `Your current recorded profit is ${money(
+                totals.profit
+              )}. Focus on collecting pending customer payments.`
+            : "Record today's sales, purchases and expenses to get a more accurate business health score."}
+        </Text>
+      </Card>
+
+      <SectionTitle title="Business Modules" />
+
+      <MenuButton
+        title="📒 Khata & Customers"
+        subtitle="Customers, suppliers, dues and payment history"
+        onPress={() => go("khata")}
+      />
+
+      <MenuButton
+        title="📦 Products & Stock"
+        subtitle="Stock, low-stock alerts and product value"
+        onPress={() => go("products")}
+      />
+
+      <MenuButton
+        title="🧾 Transactions"
+        subtitle="Sales, purchases, received and given"
+        onPress={() => go("transactions")}
+      />
+
+      <MenuButton
+        title="📊 Advanced Reports"
+        subtitle="Profit, cash flow and business numbers"
+        onPress={() => go("reports")}
+      />
+
+      <MenuButton
+        title="🧠 Smart Business Advisor"
+        subtitle="Automatic business recommendations"
+        onPress={() => go("smart")}
+      />
+    </ScrollView>
+  );
+}
+
+/* =========================================================
+   SMART ADVISOR
+========================================================= */
+
+function SmartAdvisor({ data, totals, go }) {
+  const score = healthScore(data, totals);
+
+  const dues = data.customers
+    .map((c) => ({
+      ...c,
+      balance: getPartyBalance(data, c.id),
+    }))
+    .filter((c) => c.balance > 0)
+    .sort((a, b) => b.balance - a.balance);
+
+  const lowStock = data.products.filter(
+    (p) =>
+      Number(p.stock || 0) <= Number(p.minStock || 0)
+  );
+
+  const advice = [];
+
+  if (dues.length) {
+    advice.push({
+      icon: "💰",
+      title: "Collect pending payments",
+      text: `${dues[0].name} has the highest outstanding amount: ${money(
+        dues[0].balance
+      )}.`,
     });
   }
 
-  function balance(party) {
-    let b = num(party.openingBalance);
-
-    if (party.balanceType === "advance") b = -b;
-
-    data.transactions.forEach((t) => {
-      if (
-        t.partyId !== party.id ||
-        t.partyType !== party.type
-      )
-        return;
-
-      if (party.type === "customer") {
-        if (t.type === "sale") b += num(t.amount);
-        if (t.type === "received") b -= num(t.amount);
-        if (t.type === "given") b += num(t.amount);
-      }
-
-      if (party.type === "supplier") {
-        if (t.type === "purchase") b += num(t.amount);
-        if (t.type === "given") b -= num(t.amount);
-        if (t.type === "received") b += num(t.amount);
-      }
+  if (lowStock.length) {
+    advice.push({
+      icon: "📦",
+      title: "Restock products",
+      text: `${lowStock
+        .slice(0, 3)
+        .map((p) => p.name)
+        .join(", ")} need stock attention.`,
     });
-
-    return b;
   }
 
-  const customers = useMemo(() => {
-    const q = search.toLowerCase().trim();
+  if (totals.expenses > totals.sales * 0.3) {
+    advice.push({
+      icon: "⚠️",
+      title: "Watch expenses",
+      text: "Your recorded expenses are relatively high compared with sales.",
+    });
+  }
 
-    return data.customers.filter(
-      (x) =>
-        !q ||
-        String(x.name || "").toLowerCase().includes(q) ||
-        String(x.phone || "").includes(q)
+  if (totals.profit > 0) {
+    advice.push({
+      icon: "🚀",
+      title: "Positive profit",
+      text: `Recorded profit is ${money(
+        totals.profit
+      )}. Keep monitoring margins.`,
+    });
+  } else {
+    advice.push({
+      icon: "📈",
+      title: "Improve profitability",
+      text: "Record complete sales, purchase and expense data to identify where margin is being lost.",
+    });
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.content}>
+      <Text style={styles.pageTitle}>
+        🧠 Smart Business Advisor
+      </Text>
+
+      <View style={styles.hero}>
+        <View>
+          <Text style={styles.heroSmall}>
+            BUSINESS SCORE
+          </Text>
+          <Text style={styles.score}>
+            {score}/100
+          </Text>
+        </View>
+
+        <Text style={styles.heroEmoji}>🧠</Text>
+      </View>
+
+      {advice.map((a, i) => (
+        <Card key={i}>
+          <Text style={styles.cardTitle}>
+            {a.icon} {a.title}
+          </Text>
+          <Text style={styles.cardText}>
+            {a.text}
+          </Text>
+        </Card>
+      ))}
+
+      <Card>
+        <Text style={styles.cardTitle}>
+          📌 Important
+        </Text>
+
+        <Text style={styles.cardText}>
+          This version uses your recorded business data
+          to generate automatic recommendations. It does
+          not pretend to be a real external AI service.
+        </Text>
+      </Card>
+
+      <MenuButton
+        title="← Back to Dashboard"
+        subtitle="Return to your business overview"
+        onPress={() => go("home")}
+      />
+    </ScrollView>
+  );
+}
+
+/* =========================================================
+   KHATA
+========================================================= */
+
+function Khata({ data, saveData, setModal }) {
+  const [search, setSearch] = useState("");
+
+  const customers = data.customers
+    .map((c) => ({
+      ...c,
+      balance: getPartyBalance(data, c.id),
+    }))
+    .filter((c) =>
+      c.name.toLowerCase().includes(search.toLowerCase())
     );
-  }, [data.customers, search]);
 
-  const suppliers = useMemo(() => {
-    const q = search.toLowerCase().trim();
-
-    return data.suppliers.filter(
-      (x) =>
-        !q ||
-        String(x.name || "").toLowerCase().includes(q) ||
-        String(x.phone || "").includes(q)
+  const suppliers = data.suppliers
+    .map((s) => ({
+      ...s,
+      balance: getPartyBalance(data, s.id),
+    }))
+    .filter((s) =>
+      s.name.toLowerCase().includes(search.toLowerCase())
     );
-  }, [data.suppliers, search]);
+
+  return (
+    <ScrollView contentContainerStyle={styles.content}>
+      <Text style={styles.pageTitle}>
+        📒 Khata
+      </Text>
+
+      <TextInput
+        style={styles.input}
+        placeholder="Search customer / supplier"
+        value={search}
+        onChangeText={setSearch}
+      />
+
+      <Pressable
+        style={styles.primary}
+        onPress={() => setModal("party")}
+      >
+        <Text style={styles.primaryText}>
+          + Add Customer / Supplier
+        </Text>
+      </Pressable>
+
+      <SectionTitle title="Customers" />
+
+      {customers.length === 0 && (
+        <Empty text="No customers yet" />
+      )}
+
+      {customers.map((c) => (
+        <PartyCard
+          key={c.id}
+          party={c}
+          customer
+        />
+      ))}
+
+      <SectionTitle title="Suppliers" />
+
+      {suppliers.length === 0 && (
+        <Empty text="No suppliers yet" />
+      )}
+
+      {suppliers.map((s) => (
+        <PartyCard
+          key={s.id}
+          party={s}
+        />
+      ))}
+    </ScrollView>
+  );
+}
+
+function PartyCard({ party, customer }) {
+  function whatsapp() {
+    if (!party.phone) {
+      Alert.alert("Phone number missing");
+      return;
+    }
+
+    const amount = money(Math.abs(party.balance));
+
+    const message = customer
+      ? `Namaste ${party.name}, aapke account me ${amount} payment pending hai. Kripya payment kar dein.`
+      : `Namaste ${party.name}, aapka ${amount} payable amount record me pending hai.`;
+
+    const url =
+      "whatsapp://send?phone=" +
+      party.phone +
+      "&text=" +
+      encodeURIComponent(message);
+
+    Linking.openURL(url).catch(() =>
+      Alert.alert("WhatsApp available nahi hai.")
+    );
+  }
+
+  return (
+    <Card>
+      <View style={styles.row}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.cardTitle}>
+            {party.name}
+          </Text>
+
+          <Text style={styles.cardText}>
+            {party.phone || "No phone"}
+          </Text>
+
+          <Text
+            style={[
+              styles.balance,
+              party.balance > 0
+                ? styles.due
+                : styles.clear,
+            ]}
+          >
+            {party.balance > 0
+              ? `You will receive ${money(party.balance)}`
+              : party.balance < 0
+              ? `You will give ${money(
+                  Math.abs(party.balance)
+                )}`
+              : "Settled"}
+          </Text>
+        </View>
+
+        {party.balance > 0 && (
+          <Pressable
+            style={styles.whatsapp}
+            onPress={whatsapp}
+          >
+            <Text style={styles.whatsappText}>
+              WhatsApp
+            </Text>
+          </Pressable>
+        )}
+      </View>
+    </Card>
+  );
+}
+
+/* =========================================================
+   PRODUCTS
+========================================================= */
+
+function Products({ data, saveData, setModal }) {
+  const stockValue = getStockValue(data);
+
+  const lowStock = data.products.filter(
+    (p) =>
+      Number(p.stock || 0) <= Number(p.minStock || 0)
+  );
+
+  return (
+    <ScrollView contentContainerStyle={styles.content}>
+      <Text style={styles.pageTitle}>
+        📦 Products & Stock
+      </Text>
+
+      <View style={styles.grid}>
+        <Stat
+          title="Products"
+          value={String(data.products.length)}
+        />
+
+        <Stat
+          title="Stock Value"
+          value={money(stockValue)}
+        />
+      </View>
+
+      <Pressable
+        style={styles.primary}
+        onPress={() => setModal("product")}
+      >
+        <Text style={styles.primaryText}>
+          + Add Product
+        </Text>
+      </Pressable>
+
+      {lowStock.length > 0 && (
+        <Card>
+          <Text style={styles.cardTitle}>
+            🔴 Low Stock
+          </Text>
+
+          {lowStock.map((p) => (
+            <Text
+              key={p.id}
+              style={styles.cardText}
+            >
+              {p.name}: {p.stock} {p.unit || "pcs"}
+            </Text>
+          ))}
+        </Card>
+      )}
+
+      <SectionTitle title="All Products" />
+
+      {data.products.map((p) => (
+        <Card key={p.id}>
+          <Text style={styles.cardTitle}>
+            {p.name}
+          </Text>
+
+          <Text style={styles.cardText}>
+            Sale: {money(p.price)} • Cost: {money(p.cost)}
+          </Text>
+
+          <Text style={styles.cardText}>
+            Stock: {p.stock} {p.unit || "pcs"}
+          </Text>
+
+          <Text style={styles.cardText}>
+            Margin:{" "}
+            {Number(p.price) > 0
+              ? Math.round(
+                  ((Number(p.price) -
+                    Number(p.cost)) /
+                    Number(p.price)) *
+                    100
+                )
+              : 0}
+            %
+          </Text>
+        </Card>
+      ))}
+
+      {data.products.length === 0 && (
+        <Empty text="No products added yet" />
+      )}
+    </ScrollView>
+  );
+}
+
+/* =========================================================
+   TRANSACTIONS
+========================================================= */
+
+function Transactions({ data, totals, saveData }) {
+  return (
+    <ScrollView contentContainerStyle={styles.content}>
+      <Text style={styles.pageTitle}>
+        🧾 Transactions
+      </Text>
+
+      <View style={styles.grid}>
+        <Stat
+          title="Sales"
+          value={money(totals.sales)}
+        />
+        <Stat
+          title="Purchases"
+          value={money(totals.purchases)}
+        />
+        <Stat
+          title="Received"
+          value={money(totals.received)}
+        />
+        <Stat
+          title="Given"
+          value={money(totals.given)}
+        />
+      </View>
+
+      {data.transactions
+        .slice()
+        .reverse()
+        .map((t) => (
+          <Card key={t.id}>
+            <View style={styles.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>
+                  {transactionName(t.type)}
+                </Text>
+
+                <Text style={styles.cardText}>
+                  {t.note || "Transaction"}
+                </Text>
+
+                <Text style={styles.cardText}>
+                  {t.date || today()}
+                </Text>
+              </View>
+
+              <Text style={styles.amount}>
+                {money(t.amount)}
+              </Text>
+            </View>
+          </Card>
+        ))}
+
+      {data.transactions.length === 0 && (
+        <Empty text="No transactions yet" />
+      )}
+    </ScrollView>
+  );
+}
+
+function transactionName(type) {
+  const names = {
+    sale: "Sale",
+    purchase: "Purchase",
+    received: "Payment Received",
+    given: "Payment Given",
+  };
+
+  return names[type] || type;
+}
+
+/* =========================================================
+   REPORTS
+========================================================= */
+
+function Reports({ data, totals }) {
+  const stockValue = getStockValue(data);
 
   const receivable = data.customers.reduce(
-    (s, p) =>
-      s +
-      Math.max(balance({ ...p, type: "customer" }), 0),
+    (s, c) =>
+      s + Math.max(0, getPartyBalance(data, c.id)),
     0
   );
 
   const payable = data.suppliers.reduce(
-    (s, p) =>
-      s +
-      Math.max(balance({ ...p, type: "supplier" }), 0),
+    (s, c) =>
+      s + Math.max(0, -getPartyBalance(data, c.id)),
     0
   );
 
-  const sales = data.transactions
-    .filter((x) => x.type === "sale")
-    .reduce((s, x) => s + num(x.amount), 0);
+  return (
+    <ScrollView contentContainerStyle={styles.content}>
+      <Text style={styles.pageTitle}>
+        📊 Advanced Reports
+      </Text>
 
-  const purchases = data.transactions
-    .filter((x) => x.type === "purchase")
-    .reduce((s, x) => s + num(x.amount), 0);
+      <SectionTitle title="Financial Overview" />
 
-  const received = data.transactions
-    .filter((x) => x.type === "received")
-    .reduce((s, x) => s + num(x.amount), 0);
+      <Report
+        title="Total Sales"
+        value={money(totals.sales)}
+      />
 
-  const given = data.transactions
-    .filter((x) => x.type === "given")
-    .reduce((s, x) => s + num(x.amount), 0);
+      <Report
+        title="Total Purchase"
+        value={money(totals.purchases)}
+      />
 
-  const expenses = data.expenses.reduce(
-    (s, x) => s + num(x.amount),
-    0
+      <Report
+        title="Total Expenses"
+        value={money(totals.expenses)}
+      />
+
+      <Report
+        title="Estimated Profit"
+        value={money(totals.profit)}
+      />
+
+      <SectionTitle title="Cash Flow" />
+
+      <Report
+        title="Money Received"
+        value={money(totals.received)}
+      />
+
+      <Report
+        title="Money Given"
+        value={money(totals.given)}
+      />
+
+      <Report
+        title="Net Cash Movement"
+        value={money(totals.cash)}
+      />
+
+      <SectionTitle title="Business Position" />
+
+      <Report
+        title="Customer Receivable"
+        value={money(receivable)}
+      />
+
+      <Report
+        title="Supplier Payable"
+        value={money(payable)}
+      />
+
+      <Report
+        title="Stock Value"
+        value={money(stockValue)}
+      />
+
+      <Card>
+        <Text style={styles.cardTitle}>
+          📈 Profit Insight
+        </Text>
+
+        <Text style={styles.cardText}>
+          {totals.sales > 0
+            ? `Estimated profit margin: ${Math.round(
+                (totals.profit / totals.sales) * 100
+              )}%`
+            : "Add sales to calculate margin."}
+        </Text>
+      </Card>
+    </ScrollView>
   );
+}
 
-  const estimatedProfit = sales - purchases - expenses;
+function Report({ title, value }) {
+  return (
+    <View style={styles.report}>
+      <Text style={styles.reportTitle}>
+        {title}
+      </Text>
+      <Text style={styles.reportValue}>
+        {value}
+      </Text>
+    </View>
+  );
+}
 
-  /* ---------------- PARTY ---------------- */
+/* =========================================================
+   MODALS
+========================================================= */
 
-  function openParty(type, party = null) {
-    setForm(
-      party
-        ? { ...party, type }
-        : {
-            type,
-            name: "",
-            phone: "",
-            email: "",
-            address: "",
-            gst: "",
-            openingBalance: "",
-            balanceType: "due",
-          }
-    );
+function BusinessModal({ data, saveData, close }) {
+  const [business, setBusiness] = useState({
+    ...data.business,
+  });
 
-    setModal(
-      party
-        ? "editParty"
-        : type === "customer"
-        ? "customer"
-        : "supplier"
-    );
+  async function save() {
+    await saveData({
+      ...data,
+      business,
+    });
+
+    close();
   }
+
+  return (
+    <Modal animationType="slide">
+      <SafeAreaView style={styles.modal}>
+        <Text style={styles.pageTitle}>
+          Business Profile
+        </Text>
+
+        <Input
+          label="Business Name"
+          value={business.name}
+          onChangeText={(v) =>
+            setBusiness({ ...business, name: v })
+          }
+        />
+
+        <Input
+          label="Owner"
+          value={business.owner}
+          onChangeText={(v) =>
+            setBusiness({ ...business, owner: v })
+          }
+        />
+
+        <Input
+          label="Phone"
+          value={business.phone}
+          keyboardType="phone-pad"
+          onChangeText={(v) =>
+            setBusiness({ ...business, phone: v })
+          }
+        />
+
+        <Input
+          label="UPI ID"
+          value={business.upi}
+          onChangeText={(v) =>
+            setBusiness({ ...business, upi: v })
+          }
+        />
+
+        <Input
+          label="GSTIN"
+          value={business.gstin}
+          onChangeText={(v) =>
+            setBusiness({ ...business, gstin: v })
+          }
+        />
+
+        <Pressable style={styles.primary} onPress={save}>
+          <Text style={styles.primaryText}>
+            Save Business
+          </Text>
+        </Pressable>
+
+        <Pressable style={styles.cancel} onPress={close}>
+          <Text>Cancel</Text>
+        </Pressable>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+function PartyModal({ data, saveData, close }) {
+  const [type, setType] = useState("customer");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
 
   async function chooseContact() {
     try {
@@ -294,7 +1139,7 @@ export default function App() {
 
       if (permission.status !== "granted") {
         Alert.alert(
-          "Permission",
+          "Permission required",
           "Contacts permission allow karein."
         );
         return;
@@ -303,2288 +1148,753 @@ export default function App() {
       const result =
         await Contacts.presentContactPickerAsync();
 
-      const contact = result?.contact || result;
+      const contact =
+        result?.contact || result;
 
-      if (!contact) return;
-
-      const phone =
-        contact.phoneNumbers?.[0]?.number || "";
-
-      const email =
-        contact.emails?.[0]?.email || "";
-
-      const address = contact.addresses?.[0]
-        ? [
-            contact.addresses[0].street,
-            contact.addresses[0].city,
-            contact.addresses[0].region,
-            contact.addresses[0].postalCode,
-          ]
-            .filter(Boolean)
-            .join(", ")
-        : "";
-
-      setForm((old) => ({
-        ...old,
-        name:
+      if (contact) {
+        const fullName =
           contact.name ||
-          contact.firstName ||
-          old.name ||
-          "",
-        phone,
-        email,
-        address,
-      }));
+          `${contact.firstName || ""} ${
+            contact.lastName || ""
+          }`.trim();
+
+        const number =
+          contact.phoneNumbers?.[0]?.number || "";
+
+        setName(fullName);
+        setPhone(number);
+      }
     } catch (e) {
-      Alert.alert("Contacts", "Contact select nahi ho saka.");
+      Alert.alert(
+        "Contact error",
+        "Contact select nahi ho paya."
+      );
     }
   }
 
-  function saveParty() {
-    if (!String(form.name || "").trim()) {
-      Alert.alert("Required", "Name enter karein.");
+  async function save() {
+    if (!name.trim()) {
+      Alert.alert("Name required");
       return;
     }
-
-    const type = form.type;
 
     const party = {
-      id: form.id || uid(type),
-      type,
-      name: String(form.name).trim(),
-      phone: String(form.phone || ""),
-      email: String(form.email || ""),
-      address: String(form.address || ""),
-      gst: String(form.gst || ""),
-      openingBalance: num(form.openingBalance),
-      balanceType: form.balanceType || "due",
+      id: id(),
+      name: name.trim(),
+      phone: phone.trim(),
+      createdAt: today(),
     };
 
-    update((old) => {
-      const key =
-        type === "customer" ? "customers" : "suppliers";
-
-      return {
-        ...old,
-        [key]: form.id
-          ? old[key].map((x) =>
-              x.id === form.id ? party : x
-            )
-          : [...old[key], party],
-      };
-    });
-
-    setModal("");
-    Alert.alert("Saved", "Party successfully saved.");
-  }
-
-  /* ---------------- PAYMENT ---------------- */
-
-  function openPayment(type, party) {
-    setSelected(party);
-
-    setForm({
-      amount: "",
-      paymentMode: "Cash",
-      reference: "",
-      note: "",
-      date: today(),
-    });
-
-    setModal(type);
-  }
-
-  function savePayment() {
-    const amount = num(form.amount);
-
-    if (!amount || !selected) {
-      Alert.alert("Amount", "Valid amount enter karein.");
-      return;
-    }
-
-    const tx = {
-      id: uid("tx"),
-      partyId: selected.id,
-      partyType: selected.type,
-      partyName: selected.name,
-      type: modal,
-      amount,
-      paymentMode: form.paymentMode || "Cash",
-      reference: form.reference || "",
-      note: form.note || "",
-      date: form.date || today(),
-      createdAt: Date.now(),
+    const next = {
+      ...data,
+      customers:
+        type === "customer"
+          ? [...data.customers, party]
+          : data.customers,
+      suppliers:
+        type === "supplier"
+          ? [...data.suppliers, party]
+          : data.suppliers,
     };
 
-    update((old) => ({
-      ...old,
-      transactions: [tx, ...old.transactions],
-    }));
-
-    setModal("");
-    Alert.alert("Saved", "Payment successfully saved.");
+    await saveData(next);
+    close();
   }
 
-  /* ---------------- SALE / PURCHASE ---------------- */
+  return (
+    <Modal animationType="slide">
+      <SafeAreaView style={styles.modal}>
+        <ScrollView>
+          <Text style={styles.pageTitle}>
+            Add Party
+          </Text>
 
-  function openSale(type) {
-    setForm({
-      amount: "",
-      paymentMode: "Credit",
-      reference: "",
-      note: "",
-      date: today(),
-    });
+          <View style={styles.segment}>
+            <Pressable
+              style={[
+                styles.segmentButton,
+                type === "customer" &&
+                  styles.segmentActive,
+              ]}
+              onPress={() => setType("customer")}
+            >
+              <Text>Customer</Text>
+            </Pressable>
 
-    setModal(type);
-  }
+            <Pressable
+              style={[
+                styles.segmentButton,
+                type === "supplier" &&
+                  styles.segmentActive,
+              ]}
+              onPress={() => setType("supplier")}
+            >
+              <Text>Supplier</Text>
+            </Pressable>
+          </View>
 
-  function saveSale() {
-    const amount = num(form.amount);
+          <Pressable
+            style={styles.secondary}
+            onPress={chooseContact}
+          >
+            <Text>
+              📱 Choose from Phone Contacts
+            </Text>
+          </Pressable>
 
-    if (!amount || !selected) {
-      Alert.alert("Amount", "Valid amount enter karein.");
-      return;
-    }
+          <Input
+            label="Name"
+            value={name}
+            onChangeText={setName}
+          />
 
-    const tx = {
-      id: uid("tx"),
-      partyId: selected.id,
-      partyType: selected.type,
-      partyName: selected.name,
-      type: modal,
-      amount,
-      paymentMode: form.paymentMode || "Credit",
-      reference: form.reference || "",
-      note: form.note || "",
-      date: form.date || today(),
-      createdAt: Date.now(),
-    };
+          <Input
+            label="Phone"
+            value={phone}
+            keyboardType="phone-pad"
+            onChangeText={setPhone}
+          />
 
-    update((old) => ({
-      ...old,
-      transactions: [tx, ...old.transactions],
-    }));
+          <Pressable style={styles.primary} onPress={save}>
+            <Text style={styles.primaryText}>
+              Save Party
+            </Text>
+          </Pressable>
 
-    setModal("");
-    Alert.alert("Saved", "Transaction saved.");
-  }
+          <Pressable style={styles.cancel} onPress={close}>
+            <Text>Cancel</Text>
+          </Pressable>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+}
 
-  /* ---------------- PRODUCT ---------------- */
+function ProductModal({ data, saveData, close }) {
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("");
+  const [cost, setCost] = useState("");
+  const [stock, setStock] = useState("");
+  const [minStock, setMinStock] = useState("");
+  const [unit, setUnit] = useState("pcs");
 
-  function openProduct(product = null) {
-    setForm(
-      product || {
-        name: "",
-        sku: "",
-        category: "",
-        purchasePrice: "",
-        sellingPrice: "",
-        stock: "",
-        lowStock: "5",
-        gst: "18",
-      }
-    );
-
-    setModal(product ? "editProduct" : "product");
-  }
-
-  function saveProduct() {
-    if (!String(form.name || "").trim()) {
-      Alert.alert("Required", "Product name enter karein.");
+  async function save() {
+    if (!name.trim()) {
+      Alert.alert("Product name required");
       return;
     }
 
     const product = {
-      id: form.id || uid("product"),
-      name: String(form.name).trim(),
-      sku: String(form.sku || ""),
-      category: String(form.category || ""),
-      purchasePrice: num(form.purchasePrice),
-      sellingPrice: num(form.sellingPrice),
-      stock: num(form.stock),
-      lowStock: num(form.lowStock) || 5,
-      gst: num(form.gst),
+      id: id(),
+      name: name.trim(),
+      price: Number(price || 0),
+      cost: Number(cost || 0),
+      stock: Number(stock || 0),
+      minStock: Number(minStock || 0),
+      unit,
+      createdAt: today(),
     };
 
-    update((old) => ({
-      ...old,
-      products: form.id
-        ? old.products.map((x) =>
-            x.id === form.id ? product : x
-          )
-        : [...old.products, product],
-    }));
-
-    setModal("");
-    Alert.alert("Saved", "Product saved.");
-  }
-
-  /* ---------------- INVOICE ---------------- */
-
-  function calculateInvoice() {
-    const qty = num(form.quantity) || 1;
-    const rate = num(form.rate);
-    const discount = num(form.discount);
-    const gst = num(form.gst);
-
-    const subtotal = qty * rate;
-    const taxable = Math.max(subtotal - discount, 0);
-
-    const gstAmount = (taxable * gst) / 100;
-    const half = gstAmount / 2;
-
-    return {
-      qty,
-      rate,
-      discount,
-      gst,
-      subtotal,
-      taxable,
-      gstAmount,
-      cgst: half,
-      sgst: half,
-      total: taxable + gstAmount,
-    };
-  }
-
-  function openInvoice() {
-    setForm({
-      invoiceNo:
-        "INV-" +
-        String(data.invoices.length + 1).padStart(4, "0"),
-      customerName: "",
-      customerPhone: "",
-      productName: "",
-      quantity: "1",
-      rate: "",
-      discount: "0",
-      gst: "18",
-      paymentMode: "Credit",
-      note: "",
-      date: today(),
+    await saveData({
+      ...data,
+      products: [...data.products, product],
     });
 
-    setModal("invoice");
+    close();
   }
 
-  function saveInvoice() {
-    if (!String(form.customerName || "").trim()) {
-      Alert.alert("Customer", "Customer name enter karein.");
+  return (
+    <Modal animationType="slide">
+      <SafeAreaView style={styles.modal}>
+        <ScrollView>
+          <Text style={styles.pageTitle}>
+            Add Product
+          </Text>
+
+          <Input
+            label="Product Name"
+            value={name}
+            onChangeText={setName}
+          />
+
+          <Input
+            label="Selling Price"
+            value={price}
+            keyboardType="decimal-pad"
+            onChangeText={setPrice}
+          />
+
+          <Input
+            label="Purchase / Cost Price"
+            value={cost}
+            keyboardType="decimal-pad"
+            onChangeText={setCost}
+          />
+
+          <Input
+            label="Current Stock"
+            value={stock}
+            keyboardType="decimal-pad"
+            onChangeText={setStock}
+          />
+
+          <Input
+            label="Minimum Stock Alert"
+            value={minStock}
+            keyboardType="decimal-pad"
+            onChangeText={setMinStock}
+          />
+
+          <Input
+            label="Unit"
+            value={unit}
+            onChangeText={setUnit}
+          />
+
+          <Pressable style={styles.primary} onPress={save}>
+            <Text style={styles.primaryText}>
+              Save Product
+            </Text>
+          </Pressable>
+
+          <Pressable style={styles.cancel} onPress={close}>
+            <Text>Cancel</Text>
+          </Pressable>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+function TransactionModal({ data, saveData, close }) {
+  const [type, setType] = useState("sale");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+
+  async function save() {
+    const value = Number(amount || 0);
+
+    if (value <= 0) {
+      Alert.alert("Amount enter karein");
       return;
     }
 
-    if (!String(form.productName || "").trim()) {
-      Alert.alert("Product", "Product name enter karein.");
-      return;
-    }
-
-    const c = calculateInvoice();
-
-    if (!c.rate || c.total <= 0) {
-      Alert.alert("Amount", "Valid product rate enter karein.");
-      return;
-    }
-
-    const invoice = {
-      id: uid("invoice"),
-      invoiceNo: form.invoiceNo,
-      customerName: form.customerName,
-      customerPhone: form.customerPhone || "",
-      productName: form.productName,
-      quantity: c.qty,
-      rate: c.rate,
-      discount: c.discount,
-      gst: c.gst,
-      subtotal: c.subtotal,
-      taxable: c.taxable,
-      cgst: c.cgst,
-      sgst: c.sgst,
-      gstAmount: c.gstAmount,
-      total: c.total,
-      paymentMode: form.paymentMode,
-      note: form.note || "",
-      date: form.date || today(),
-      createdAt: Date.now(),
+    const transaction = {
+      id: id(),
+      type,
+      amount: value,
+      note,
+      date: today(),
     };
 
-    update((old) => ({
-      ...old,
-      invoices: [invoice, ...old.invoices],
+    await saveData({
+      ...data,
       transactions: [
-        {
-          id: uid("tx"),
-          partyId: "",
-          partyType: "customer",
-          partyName: invoice.customerName,
-          type: "sale",
-          amount: invoice.total,
-          paymentMode: invoice.paymentMode,
-          reference: invoice.invoiceNo,
-          note: invoice.productName,
-          date: invoice.date,
-          createdAt: Date.now(),
-        },
-        ...old.transactions,
+        ...data.transactions,
+        transaction,
       ],
-    }));
-
-    setModal("");
-    Alert.alert(
-      "Invoice Created",
-      `${invoice.invoiceNo}\nTotal: ${money(invoice.total)}`
-    );
-  }
-
-  /* ---------------- ESTIMATE ---------------- */
-
-  function openEstimate() {
-    setForm({
-      estimateNo:
-        "EST-" +
-        String(data.estimates.length + 1).padStart(4, "0"),
-      customerName: "",
-      productName: "",
-      quantity: "1",
-      rate: "",
-      discount: "0",
-      gst: "18",
-      note: "",
-      date: today(),
     });
 
-    setModal("estimate");
+    close();
   }
 
-  function saveEstimate() {
-    const qty = num(form.quantity) || 1;
-    const rate = num(form.rate);
-    const discount = num(form.discount);
-    const gst = num(form.gst);
-
-    if (!form.customerName || !form.productName || !rate) {
-      Alert.alert(
-        "Required",
-        "Customer, product aur rate enter karein."
-      );
-      return;
-    }
-
-    const subtotal = qty * rate;
-    const taxable = Math.max(subtotal - discount, 0);
-    const gstAmount = taxable * gst / 100;
-    const total = taxable + gstAmount;
-
-    const estimate = {
-      id: uid("estimate"),
-      estimateNo: form.estimateNo,
-      customerName: form.customerName,
-      productName: form.productName,
-      quantity: qty,
-      rate,
-      discount,
-      gst,
-      subtotal,
-      gstAmount,
-      total,
-      note: form.note || "",
-      date: form.date || today(),
-      createdAt: Date.now(),
-    };
-
-    update((old) => ({
-      ...old,
-      estimates: [estimate, ...old.estimates],
-    }));
-
-    setModal("");
-    Alert.alert(
-      "Estimate Created",
-      `${estimate.estimateNo}\nTotal: ${money(total)}`
-    );
-  }
-
-  /* ---------------- EXPENSE ---------------- */
-
-  function openExpense() {
-    setForm({
-      title: "",
-      amount: "",
-      category: "",
-      paymentMode: "Cash",
-      note: "",
-      date: today(),
-    });
-
-    setModal("expense");
-  }
-
-  function saveExpense() {
-    if (!form.title || !num(form.amount)) {
-      Alert.alert("Required", "Expense name aur amount enter karein.");
-      return;
-    }
-
-    const expense = {
-      id: uid("expense"),
-      title: form.title,
-      amount: num(form.amount),
-      category: form.category || "General",
-      paymentMode: form.paymentMode || "Cash",
-      note: form.note || "",
-      date: form.date || today(),
-      createdAt: Date.now(),
-    };
-
-    update((old) => ({
-      ...old,
-      expenses: [expense, ...old.expenses],
-    }));
-
-    setModal("");
-    Alert.alert("Saved", "Expense saved.");
-  }
-
-  /* ---------------- WHATSAPP ---------------- */
-
-  async function whatsapp(party) {
-    if (!party.phone) {
-      Alert.alert("Phone", "Phone number available nahi hai.");
-      return;
-    }
-
-    let phone = String(party.phone).replace(/\D/g, "");
-
-    if (phone.length === 10) phone = "91" + phone;
-
-    const b = balance(party);
-
-    const message =
-      `Namaste ${party.name},\n\n` +
-      `${data.business.name}\n` +
-      `Current Balance: ${money(Math.abs(b))}\n\n` +
-      `Please check your account.\nThank you.`;
-
-    try {
-      await Linking.openURL(
-        `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
-      );
-    } catch {
-      Alert.alert("WhatsApp", "WhatsApp open nahi ho saka.");
-    }
-  }
-
-  async function call(party) {
-    if (!party.phone) return;
-
-    try {
-      await Linking.openURL(
-        `tel:${String(party.phone).replace(/[^0-9+]/g, "")}`
-      );
-    } catch {}
-  }
-
-  /* ---------------- BUSINESS ---------------- */
-
-  function openBusiness() {
-    setForm({ ...data.business });
-    setModal("business");
-  }
-
-  function saveBusiness() {
-    update((old) => ({
-      ...old,
-      business: {
-        ...old.business,
-        name: form.name || "Vyapar Khata",
-        phone: form.phone || "",
-        address: form.address || "",
-        gst: form.gst || "",
-        state: form.state || "",
-      },
-    }));
-
-    setModal("");
-  }
-
-  /* ---------------- PIN ---------------- */
-
-  function openPin() {
-    setForm({ newPin: "" });
-    setModal("pin");
-  }
-
-  async function savePin() {
-    if (!/^\d{4,6}$/.test(String(form.newPin || ""))) {
-      Alert.alert("PIN", "4-6 digit PIN enter karein.");
-      return;
-    }
-
-    await AsyncStorage.setItem(PIN_KEY, form.newPin);
-
-    setSavedPin(form.newPin);
-    setLocked(false);
-    setModal("");
-
-    Alert.alert("Success", "PIN saved.");
-  }
-
-  function unlock() {
-    if (pin === savedPin) {
-      setLocked(false);
-      setPin("");
-    } else {
-      Alert.alert("Wrong PIN", "PIN incorrect hai.");
-    }
-  }
-
-  function removePin() {
-    Alert.alert("Remove PIN", "PIN remove karna hai?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: async () => {
-          await AsyncStorage.removeItem(PIN_KEY);
-          setSavedPin("");
-        },
-      },
-    ]);
-  }
-
-  /* ---------------- BACKUP ---------------- */
-
-  async function createBackup() {
-    try {
-      await AsyncStorage.setItem(
-        BACKUP_KEY,
-        JSON.stringify(data)
-      );
-
-      Alert.alert(
-        "Backup Ready",
-        "Aapka latest business data local backup mein save hai."
-      );
-    } catch {
-      Alert.alert("Backup", "Backup failed.");
-    }
-  }
-
-  /* ---------------- HOME ---------------- */
-
-  function renderHome() {
-    const list =
-      tab === "customers" ? customers : suppliers;
-
-    return (
-      <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.header}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.brand}>
-              {data.business.name}
-            </Text>
-            <Text style={styles.sub}>
-              Smart Business Management
-            </Text>
-          </View>
-
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={openBusiness}
-          >
-            <Text style={{ fontSize: 21 }}>⚙️</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.grid}>
-          <Card title="Receivable" value={money(receivable)} />
-          <Card title="Payable" value={money(payable)} />
-          <Card title="Sales" value={money(sales)} />
-          <Card title="Profit" value={money(estimatedProfit)} />
-        </View>
-
-        <View style={styles.actionGrid}>
-          <BigButton
-            title="＋ Customer"
-            onPress={() => openParty("customer")}
-          />
-          <BigButton
-            title="＋ Supplier"
-            light
-            onPress={() => openParty("supplier")}
-          />
-        </View>
-
-        <View style={styles.actionGrid}>
-          <BigButton
-            title="🧾 Invoice"
-            onPress={openInvoice}
-          />
-          <BigButton
-            title="📋 Estimate"
-            light
-            onPress={openEstimate}
-          />
-        </View>
-
-        <View style={styles.actionGrid}>
-          <BigButton
-            title="📦 Products"
-            onPress={() => setPage("products")}
-          />
-          <BigButton
-            title="📊 Reports"
-            light
-            onPress={() => setPage("reports")}
-          />
-        </View>
-
-        <TouchableOpacity
-          style={styles.expense}
-          onPress={openExpense}
-        >
-          <Text style={styles.bold}>
-            ＋ Add Business Expense
+  return (
+    <Modal animationType="slide">
+      <SafeAreaView style={styles.modal}>
+        <ScrollView>
+          <Text style={styles.pageTitle}>
+            Add Transaction
           </Text>
-        </TouchableOpacity>
 
-        <Text style={styles.heading}>Parties</Text>
-
-        <View style={styles.tabs}>
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              tab === "customers" && styles.activeTab,
-            ]}
-            onPress={() => setTab("customers")}
-          >
-            <Text style={styles.bold}>
-              Customers ({data.customers.length})
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              tab === "suppliers" && styles.activeTab,
-            ]}
-            onPress={() => setTab("suppliers")}
-          >
-            <Text style={styles.bold}>
-              Suppliers ({data.suppliers.length})
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <TextInput
-          style={styles.search}
-          placeholder="🔎 Search name or phone"
-          value={search}
-          onChangeText={setSearch}
-        />
-
-        {list.map((p) => {
-          const type =
-            tab === "customers"
-              ? "customer"
-              : "supplier";
-
-          const b = balance({ ...p, type });
-
-          return (
-            <TouchableOpacity
-              key={p.id}
-              style={styles.party}
-              onPress={() => {
-                setSelected({ ...p, type });
-                setPage("party");
-              }}
-            >
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>
-                  {(p.name || "?")[0].toUpperCase()}
-                </Text>
-              </View>
-
-              <View style={{ flex: 1 }}>
-                <Text style={styles.partyName}>
-                  {p.name}
-                </Text>
-                <Text style={styles.muted}>
-                  {p.phone || "No phone"}
-                </Text>
-              </View>
-
-              <Text
+          <View style={styles.wrap}>
+            {[
+              ["sale", "Sale"],
+              ["purchase", "Purchase"],
+              ["received", "Received"],
+              ["given", "Given"],
+            ].map(([v, label]) => (
+              <Pressable
+                key={v}
                 style={[
-                  styles.amount,
-                  b > 0 ? styles.red : styles.green,
+                  styles.typeButton,
+                  type === v &&
+                    styles.typeActive,
                 ]}
+                onPress={() => setType(v)}
               >
-                {money(Math.abs(b))}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-
-        {list.length === 0 && (
-          <View style={styles.empty}>
-            <Text style={{ fontSize: 42 }}>👥</Text>
-            <Text style={styles.bold}>
-              No parties yet
-            </Text>
-            <Text style={styles.muted}>
-              Add customer or supplier from above.
-            </Text>
+                <Text>{label}</Text>
+              </Pressable>
+            ))}
           </View>
-        )}
 
-        <View style={styles.stats}>
-          <Text style={styles.cardTitle}>
-            Business Summary
-          </Text>
-
-          <Row title="Received" value={money(received)} />
-          <Row title="Given" value={money(given)} />
-          <Row title="Purchases" value={money(purchases)} />
-          <Row title="Expenses" value={money(expenses)} />
-          <Row
-            title="Estimated Profit"
-            value={money(estimatedProfit)}
+          <Input
+            label="Amount"
+            value={amount}
+            keyboardType="decimal-pad"
+            onChangeText={setAmount}
           />
-        </View>
 
-        <Text style={styles.heading}>
-          Recent Activity
-        </Text>
+          <Input
+            label="Note"
+            value={note}
+            onChangeText={setNote}
+          />
 
-        {data.transactions.slice(0, 8).map((t) => (
-          <View style={styles.transaction} key={t.id}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.bold}>
-                {t.partyName}
-              </Text>
-              <Text style={styles.muted}>
-                {transactionTitle(t.type)}
-              </Text>
-              <Text style={styles.small}>
-                {t.date}
-              </Text>
-            </View>
-
-            <Text style={styles.amount}>
-              {money(t.amount)}
+          <Pressable style={styles.primary} onPress={save}>
+            <Text style={styles.primaryText}>
+              Save Transaction
             </Text>
-          </View>
-        ))}
-      </ScrollView>
-    );
-  }
+          </Pressable>
 
-  /* ---------------- PARTY PAGE ---------------- */
+          <Pressable style={styles.cancel} onPress={close}>
+            <Text>Cancel</Text>
+          </Pressable>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+}
 
-  function renderParty() {
-    if (!selected) return null;
+/* =========================================================
+   UI COMPONENTS
+========================================================= */
 
-    const b = balance(selected);
+function Bottom({ current, setScreen }) {
+  const items = [
+    ["home", "🏠", "Home"],
+    ["khata", "📒", "Khata"],
+    ["products", "📦", "Stock"],
+    ["reports", "📊", "Reports"],
+    ["smart", "🧠", "Smart"],
+  ];
 
-    const tx = data.transactions.filter(
-      (x) =>
-        x.partyId === selected.id &&
-        x.partyType === selected.type
-    );
-
-    return (
-      <ScrollView contentContainerStyle={styles.content}>
-        <TouchableOpacity
-          onPress={() => {
-            setPage("home");
-            setSelected(null);
-          }}
+  return (
+    <>
+      {items.map(([screen, icon, title]) => (
+        <Pressable
+          key={screen}
+          style={styles.navItem}
+          onPress={() => setScreen(screen)}
         >
-          <Text style={styles.back}>← Back</Text>
-        </TouchableOpacity>
-
-        <View style={styles.profile}>
-          <View style={styles.bigAvatar}>
-            <Text style={styles.bigAvatarText}>
-              {(selected.name || "?")[0].toUpperCase()}
-            </Text>
-          </View>
-
-          <Text style={styles.profileName}>
-            {selected.name}
-          </Text>
-
-          <Text style={styles.muted}>
-            {selected.phone || "No phone"}
-          </Text>
-
-          {selected.email ? (
-            <Text style={styles.muted}>
-              {selected.email}
-            </Text>
-          ) : null}
-
-          {selected.address ? (
-            <Text style={styles.muted}>
-              {selected.address}
-            </Text>
-          ) : null}
-
-          <Text style={styles.muted}>
-            Current Balance
+          <Text style={styles.navIcon}>
+            {icon}
           </Text>
 
           <Text
             style={[
-              styles.bigBalance,
-              b > 0 ? styles.red : styles.green,
+              styles.navText,
+              current === screen &&
+                styles.navSelected,
             ]}
           >
-            {money(Math.abs(b))}
+            {title}
           </Text>
-        </View>
-
-        <View style={styles.actionGrid}>
-          <BigButton
-            title="+ Received"
-            onPress={() =>
-              openPayment("received", selected)
-            }
-          />
-          <BigButton
-            title="- Given"
-            light
-            onPress={() =>
-              openPayment("given", selected)
-            }
-          />
-        </View>
-
-        <View style={styles.actionGrid}>
-          <BigButton
-            title={
-              selected.type === "customer"
-                ? "+ Sale"
-                : "+ Purchase"
-            }
-            onPress={() =>
-              openSale(
-                selected.type === "customer"
-                  ? "sale"
-                  : "purchase"
-              )
-            }
-          />
-
-          <BigButton
-            title="✏️ Edit"
-            light
-            onPress={() =>
-              openParty(selected.type, selected)
-            }
-          />
-        </View>
-
-        <View style={styles.actionGrid}>
-          <BigButton
-            title="📞 Call"
-            light
-            onPress={() => call(selected)}
-          />
-
-          <BigButton
-            title="💬 WhatsApp"
-            onPress={() => whatsapp(selected)}
-          />
-        </View>
-
-        <Text style={styles.heading}>Ledger</Text>
-
-        {tx.map((t) => (
-          <View style={styles.transaction} key={t.id}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.bold}>
-                {transactionTitle(t.type)}
-              </Text>
-              <Text style={styles.muted}>
-                {t.note || t.paymentMode}
-              </Text>
-              <Text style={styles.small}>
-                {t.date}
-                {t.reference
-                  ? ` • ${t.reference}`
-                  : ""}
-              </Text>
-            </View>
-
-            <Text style={styles.amount}>
-              {money(t.amount)}
-            </Text>
-          </View>
-        ))}
-      </ScrollView>
-    );
-  }
-
-  /* ---------------- PRODUCTS ---------------- */
-
-  function renderProducts() {
-    return (
-      <ScrollView contentContainerStyle={styles.content}>
-        <TouchableOpacity onPress={() => setPage("home")}>
-          <Text style={styles.back}>← Back</Text>
-        </TouchableOpacity>
-
-        <View style={styles.pageHeader}>
-          <Text style={styles.heading}>Products & Stock</Text>
-
-          <TouchableOpacity
-            style={styles.smallButton}
-            onPress={() => openProduct()}
-          >
-            <Text style={styles.whiteBold}>＋ Product</Text>
-          </TouchableOpacity>
-        </View>
-
-        {data.products.map((p) => (
-          <TouchableOpacity
-            style={styles.product}
-            key={p.id}
-            onPress={() => openProduct(p)}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.bold}>{p.name}</Text>
-
-              <Text style={styles.muted}>
-                SKU: {p.sku || "-"}
-              </Text>
-
-              <Text style={styles.muted}>
-                Sale: {money(p.sellingPrice)}
-              </Text>
-            </View>
-
-            <View style={{ alignItems: "flex-end" }}>
-              <Text
-                style={[
-                  styles.bold,
-                  p.stock <= p.lowStock
-                    ? styles.red
-                    : styles.green,
-                ]}
-              >
-                Stock: {p.stock}
-              </Text>
-
-              <Text style={styles.muted}>
-                GST {p.gst}%
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-
-        {data.products.length === 0 && (
-          <View style={styles.empty}>
-            <Text style={{ fontSize: 42 }}>📦</Text>
-            <Text style={styles.bold}>
-              No products
-            </Text>
-          </View>
-        )}
-      </ScrollView>
-    );
-  }
-
-  /* ---------------- REPORTS ---------------- */
-
-  function renderReports() {
-    return (
-      <ScrollView contentContainerStyle={styles.content}>
-        <TouchableOpacity onPress={() => setPage("home")}>
-          <Text style={styles.back}>← Back</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.heading}>
-          Business Reports
-        </Text>
-
-        <Card title="Total Sales" value={money(sales)} />
-        <Card
-          title="Total Purchases"
-          value={money(purchases)}
-        />
-        <Card
-          title="Total Received"
-          value={money(received)}
-        />
-        <Card
-          title="Total Given"
-          value={money(given)}
-        />
-        <Card
-          title="Total Expenses"
-          value={money(expenses)}
-        />
-        <Card
-          title="Estimated Profit"
-          value={money(estimatedProfit)}
-        />
-
-        <View style={styles.stats}>
-          <Text style={styles.cardTitle}>
-            Documents
-          </Text>
-
-          <Row
-            title="Invoices"
-            value={String(data.invoices.length)}
-          />
-
-          <Row
-            title="Estimates"
-            value={String(data.estimates.length)}
-          />
-
-          <Row
-            title="Products"
-            value={String(data.products.length)}
-          />
-
-          <Row
-            title="Customers"
-            value={String(data.customers.length)}
-          />
-
-          <Row
-            title="Suppliers"
-            value={String(data.suppliers.length)}
-          />
-        </View>
-
-        <TouchableOpacity
-          style={styles.backup}
-          onPress={createBackup}
-        >
-          <Text style={styles.whiteBold}>
-            💾 Create Local Backup
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
-    );
-  }
-
-  /* ---------------- MODALS ---------------- */
-
-  function renderModal() {
-    if (!modal) return null;
-
-    const party =
-      modal === "customer" ||
-      modal === "supplier" ||
-      modal === "editParty";
-
-    const invoiceCalc =
-      modal === "invoice"
-        ? calculateInvoice()
-        : null;
-
-    return (
-      <Modal
-        visible
-        transparent
-        animationType="slide"
-        onRequestClose={() => setModal("")}
-      >
-        <View style={styles.overlay}>
-          <View style={styles.modal}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {party
-                  ? modal === "editParty"
-                    ? "Edit Party"
-                    : modal === "customer"
-                    ? "Add Customer"
-                    : "Add Supplier"
-                  : modal === "product" ||
-                    modal === "editProduct"
-                  ? "Product"
-                  : modal === "invoice"
-                  ? "Create GST Invoice"
-                  : modal === "estimate"
-                  ? "Create Estimate"
-                  : modal === "expense"
-                  ? "Add Expense"
-                  : modal === "received"
-                  ? "Payment Received"
-                  : modal === "given"
-                  ? "Payment Given"
-                  : modal === "sale"
-                  ? "Sale"
-                  : modal === "purchase"
-                  ? "Purchase"
-                  : modal === "business"
-                  ? "Business Profile"
-                  : "App PIN"}
-              </Text>
-
-              <TouchableOpacity
-                onPress={() => setModal("")}
-              >
-                <Text style={{ fontSize: 22 }}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: 30 }}
-            >
-              {party && (
-                <>
-                  {!form.id && (
-                    <TouchableOpacity
-                      style={styles.contactButton}
-                      onPress={chooseContact}
-                    >
-                      <Text style={styles.whiteBold}>
-                        👤 Choose from Phone Contacts
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-
-                  <Field
-                    label="Name"
-                    value={form.name}
-                    onChangeText={(v) =>
-                      setForm({ ...form, name: v })
-                    }
-                    placeholder="Party name"
-                  />
-
-                  <Field
-                    label="Phone"
-                    value={form.phone}
-                    onChangeText={(v) =>
-                      setForm({ ...form, phone: v })
-                    }
-                    placeholder="Phone"
-                    keyboardType="phone-pad"
-                  />
-
-                  <Field
-                    label="Email"
-                    value={form.email}
-                    onChangeText={(v) =>
-                      setForm({ ...form, email: v })
-                    }
-                    placeholder="Email"
-                  />
-
-                  <Field
-                    label="Address"
-                    value={form.address}
-                    onChangeText={(v) =>
-                      setForm({ ...form, address: v })
-                    }
-                    placeholder="Address"
-                  />
-
-                  <Field
-                    label="GSTIN"
-                    value={form.gst}
-                    onChangeText={(v) =>
-                      setForm({ ...form, gst: v })
-                    }
-                    placeholder="GSTIN"
-                  />
-
-                  <Field
-                    label="Opening Balance"
-                    value={form.openingBalance}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        openingBalance: v,
-                      })
-                    }
-                    placeholder="0"
-                    keyboardType="numeric"
-                  />
-
-                  <Save
-                    title={form.id ? "Update Party" : "Save Party"}
-                    onPress={saveParty}
-                  />
-                </>
-              )}
-
-              {(modal === "received" ||
-                modal === "given" ||
-                modal === "sale" ||
-                modal === "purchase") && (
-                <>
-                  <Field
-                    label="Amount"
-                    value={form.amount}
-                    onChangeText={(v) =>
-                      setForm({ ...form, amount: v })
-                    }
-                    placeholder="Amount"
-                    keyboardType="numeric"
-                  />
-
-                  <Text style={styles.label}>
-                    Payment Mode
-                  </Text>
-
-                  <View style={styles.choices}>
-                    {["Cash", "UPI", "Bank", "Cheque", "Credit"].map(
-                      (x) => (
-                        <Choice
-                          key={x}
-                          title={x}
-                          active={
-                            form.paymentMode === x
-                          }
-                          onPress={() =>
-                            setForm({
-                              ...form,
-                              paymentMode: x,
-                            })
-                          }
-                        />
-                      )
-                    )}
-                  </View>
-
-                  <Field
-                    label="Reference"
-                    value={form.reference}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        reference: v,
-                      })
-                    }
-                    placeholder="Reference / UTR"
-                  />
-
-                  <Field
-                    label="Note"
-                    value={form.note}
-                    onChangeText={(v) =>
-                      setForm({ ...form, note: v })
-                    }
-                    placeholder="Note"
-                  />
-
-                  <Field
-                    label="Date"
-                    value={form.date}
-                    onChangeText={(v) =>
-                      setForm({ ...form, date: v })
-                    }
-                    placeholder="DD/MM/YYYY"
-                  />
-
-                  <Save
-                    title="Save Transaction"
-                    onPress={
-                      modal === "received" ||
-                      modal === "given"
-                        ? savePayment
-                        : saveSale
-                    }
-                  />
-                </>
-              )}
-
-              {(modal === "product" ||
-                modal === "editProduct") && (
-                <>
-                  <Field
-                    label="Product Name"
-                    value={form.name}
-                    onChangeText={(v) =>
-                      setForm({ ...form, name: v })
-                    }
-                    placeholder="Product name"
-                  />
-
-                  <Field
-                    label="SKU / Code"
-                    value={form.sku}
-                    onChangeText={(v) =>
-                      setForm({ ...form, sku: v })
-                    }
-                    placeholder="SKU"
-                  />
-
-                  <Field
-                    label="Category"
-                    value={form.category}
-                    onChangeText={(v) =>
-                      setForm({ ...form, category: v })
-                    }
-                    placeholder="Category"
-                  />
-
-                  <Field
-                    label="Purchase Price"
-                    value={form.purchasePrice}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        purchasePrice: v,
-                      })
-                    }
-                    placeholder="Purchase price"
-                    keyboardType="numeric"
-                  />
-
-                  <Field
-                    label="Selling Price"
-                    value={form.sellingPrice}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        sellingPrice: v,
-                      })
-                    }
-                    placeholder="Selling price"
-                    keyboardType="numeric"
-                  />
-
-                  <Field
-                    label="Stock Quantity"
-                    value={form.stock}
-                    onChangeText={(v) =>
-                      setForm({ ...form, stock: v })
-                    }
-                    placeholder="Stock"
-                    keyboardType="numeric"
-                  />
-
-                  <Field
-                    label="Low Stock Alert"
-                    value={form.lowStock}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        lowStock: v,
-                      })
-                    }
-                    placeholder="5"
-                    keyboardType="numeric"
-                  />
-
-                  <Field
-                    label="GST %"
-                    value={form.gst}
-                    onChangeText={(v) =>
-                      setForm({ ...form, gst: v })
-                    }
-                    placeholder="18"
-                    keyboardType="numeric"
-                  />
-
-                  <Save
-                    title="Save Product"
-                    onPress={saveProduct}
-                  />
-                </>
-              )}
-
-              {modal === "invoice" && (
-                <>
-                  <Field
-                    label="Invoice Number"
-                    value={form.invoiceNo}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        invoiceNo: v,
-                      })
-                    }
-                    placeholder="INV-0001"
-                  />
-
-                  <Field
-                    label="Customer Name"
-                    value={form.customerName}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        customerName: v,
-                      })
-                    }
-                    placeholder="Customer"
-                  />
-
-                  <Field
-                    label="Customer Phone"
-                    value={form.customerPhone}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        customerPhone: v,
-                      })
-                    }
-                    placeholder="Phone"
-                    keyboardType="phone-pad"
-                  />
-
-                  <Field
-                    label="Product / Service"
-                    value={form.productName}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        productName: v,
-                      })
-                    }
-                    placeholder="Product"
-                  />
-
-                  <Field
-                    label="Quantity"
-                    value={form.quantity}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        quantity: v,
-                      })
-                    }
-                    keyboardType="numeric"
-                  />
-
-                  <Field
-                    label="Rate"
-                    value={form.rate}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        rate: v,
-                      })
-                    }
-                    placeholder="Rate"
-                    keyboardType="numeric"
-                  />
-
-                  <Field
-                    label="Discount"
-                    value={form.discount}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        discount: v,
-                      })
-                    }
-                    keyboardType="numeric"
-                  />
-
-                  <Field
-                    label="GST %"
-                    value={form.gst}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        gst: v,
-                      })
-                    }
-                    keyboardType="numeric"
-                  />
-
-                  {invoiceCalc && (
-                    <View style={styles.invoicePreview}>
-                      <Row
-                        title="Subtotal"
-                        value={money(invoiceCalc.subtotal)}
-                      />
-                      <Row
-                        title="Taxable"
-                        value={money(invoiceCalc.taxable)}
-                      />
-                      <Row
-                        title="CGST"
-                        value={money(invoiceCalc.cgst)}
-                      />
-                      <Row
-                        title="SGST"
-                        value={money(invoiceCalc.sgst)}
-                      />
-                      <Row
-                        title="Grand Total"
-                        value={money(invoiceCalc.total)}
-                      />
-                    </View>
-                  )}
-
-                  <Save
-                    title="Create GST Invoice"
-                    onPress={saveInvoice}
-                  />
-                </>
-              )}
-
-              {modal === "estimate" && (
-                <>
-                  <Field
-                    label="Estimate Number"
-                    value={form.estimateNo}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        estimateNo: v,
-                      })
-                    }
-                  />
-
-                  <Field
-                    label="Customer"
-                    value={form.customerName}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        customerName: v,
-                      })
-                    }
-                  />
-
-                  <Field
-                    label="Product / Service"
-                    value={form.productName}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        productName: v,
-                      })
-                    }
-                  />
-
-                  <Field
-                    label="Quantity"
-                    value={form.quantity}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        quantity: v,
-                      })
-                    }
-                    keyboardType="numeric"
-                  />
-
-                  <Field
-                    label="Rate"
-                    value={form.rate}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        rate: v,
-                      })
-                    }
-                    keyboardType="numeric"
-                  />
-
-                  <Field
-                    label="Discount"
-                    value={form.discount}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        discount: v,
-                      })
-                    }
-                    keyboardType="numeric"
-                  />
-
-                  <Field
-                    label="GST %"
-                    value={form.gst}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        gst: v,
-                      })
-                    }
-                    keyboardType="numeric"
-                  />
-
-                  <Field
-                    label="Note"
-                    value={form.note}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        note: v,
-                      })
-                    }
-                  />
-
-                  <Save
-                    title="Create Estimate"
-                    onPress={saveEstimate}
-                  />
-                </>
-              )}
-
-              {modal === "expense" && (
-                <>
-                  <Field
-                    label="Expense Name"
-                    value={form.title}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        title: v,
-                      })
-                    }
-                    placeholder="Rent, electricity, transport..."
-                  />
-
-                  <Field
-                    label="Category"
-                    value={form.category}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        category: v,
-                      })
-                    }
-                    placeholder="Business"
-                  />
-
-                  <Field
-                    label="Amount"
-                    value={form.amount}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        amount: v,
-                      })
-                    }
-                    keyboardType="numeric"
-                  />
-
-                  <Field
-                    label="Note"
-                    value={form.note}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        note: v,
-                      })
-                    }
-                  />
-
-                  <Save
-                    title="Save Expense"
-                    onPress={saveExpense}
-                  />
-                </>
-              )}
-
-              {modal === "business" && (
-                <>
-                  <Field
-                    label="Business Name"
-                    value={form.name}
-                    onChangeText={(v) =>
-                      setForm({ ...form, name: v })
-                    }
-                  />
-
-                  <Field
-                    label="Phone"
-                    value={form.phone}
-                    onChangeText={(v) =>
-                      setForm({ ...form, phone: v })
-                    }
-                    keyboardType="phone-pad"
-                  />
-
-                  <Field
-                    label="Address"
-                    value={form.address}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        address: v,
-                      })
-                    }
-                  />
-
-                  <Field
-                    label="GSTIN"
-                    value={form.gst}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        gst: v,
-                      })
-                    }
-                  />
-
-                  <Field
-                    label="State"
-                    value={form.state}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        state: v,
-                      })
-                    }
-                  />
-
-                  <Save
-                    title="Save Business"
-                    onPress={saveBusiness}
-                  />
-                </>
-              )}
-
-              {modal === "pin" && (
-                <>
-                  <Field
-                    label="New PIN"
-                    value={form.newPin}
-                    onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        newPin: v,
-                      })
-                    }
-                    keyboardType="numeric"
-                    secureTextEntry
-                  />
-
-                  <Save
-                    title="Save PIN"
-                    onPress={savePin}
-                  />
-                </>
-              )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-    );
-  }
-
-  if (!ready) {
-    return (
-      <SafeAreaView style={styles.loading}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.brand}>Vyapar Khata</Text>
-        <Text>Loading business data...</Text>
-      </SafeAreaView>
-    );
-  }
-
-  if (locked) {
-    return (
-      <SafeAreaView style={styles.lock}>
-        <Text style={{ fontSize: 55 }}>🔐</Text>
-
-        <Text style={styles.brand}>
-          Vyapar Khata
-        </Text>
-
-        <Text style={styles.muted}>
-          Enter PIN to continue
-        </Text>
-
-        <TextInput
-          style={styles.pin}
-          value={pin}
-          onChangeText={setPin}
-          keyboardType="numeric"
-          secureTextEntry
-          maxLength={6}
-          placeholder="PIN"
-        />
-
-        <TouchableOpacity
-          style={styles.save}
-          onPress={unlock}
-        >
-          <Text style={styles.whiteBold}>
-            Unlock
-          </Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <SafeAreaView style={styles.container}>
-      {page === "home" && renderHome()}
-      {page === "party" && renderParty()}
-      {page === "products" && renderProducts()}
-      {page === "reports" && renderReports()}
-
-      <View style={styles.bottom}>
-        <TouchableOpacity
-          style={styles.bottomItem}
-          onPress={() => {
-            setPage("home");
-            setSelected(null);
-          }}
-        >
-          <Text>🏠</Text>
-          <Text style={styles.small}>Home</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.bottomItem}
-          onPress={() => setPage("products")}
-        >
-          <Text>📦</Text>
-          <Text style={styles.small}>Stock</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.bottomItem}
-          onPress={openInvoice}
-        >
-          <Text>🧾</Text>
-          <Text style={styles.small}>Invoice</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.bottomItem}
-          onPress={() => setPage("reports")}
-        >
-          <Text>📊</Text>
-          <Text style={styles.small}>Reports</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.bottomItem}
-          onPress={openPin}
-        >
-          <Text>🔐</Text>
-          <Text style={styles.small}>PIN</Text>
-        </TouchableOpacity>
-      </View>
-
-      {renderModal()}
-    </SafeAreaView>
+        </Pressable>
+      ))}
+    </>
   );
 }
 
-/* ---------------- COMPONENTS ---------------- */
-
-function Card({ title, value }) {
+function Stat({ title, value }) {
   return (
-    <View style={styles.card}>
-      <Text style={styles.muted}>{title}</Text>
-      <Text style={styles.cardValue}>{value}</Text>
-    </View>
-  );
-}
-
-function Row({ title, value }) {
-  return (
-    <View style={styles.row}>
-      <Text>{title}</Text>
-      <Text style={styles.bold}>{value}</Text>
-    </View>
-  );
-}
-
-function BigButton({ title, onPress, light }) {
-  return (
-    <TouchableOpacity
-      style={[
-        styles.bigButton,
-        light && styles.lightButton,
-      ]}
-      onPress={onPress}
-    >
-      <Text
-        style={[
-          styles.bold,
-          !light && styles.whiteBold,
-        ]}
-      >
+    <View style={styles.stat}>
+      <Text style={styles.statTitle}>
         {title}
       </Text>
-    </TouchableOpacity>
+
+      <Text style={styles.statValue}>
+        {value}
+      </Text>
+    </View>
   );
 }
 
-function Field({
+function Action({ icon, title, onPress }) {
+  return (
+    <Pressable
+      style={styles.action}
+      onPress={onPress}
+    >
+      <Text style={styles.actionIcon}>
+        {icon}
+      </Text>
+
+      <Text style={styles.actionText}>
+        {title}
+      </Text>
+    </Pressable>
+  );
+}
+
+function MenuButton({ title, subtitle, onPress }) {
+  return (
+    <Pressable
+      style={styles.menu}
+      onPress={onPress}
+    >
+      <Text style={styles.menuTitle}>
+        {title}
+      </Text>
+
+      <Text style={styles.menuSub}>
+        {subtitle}
+      </Text>
+    </Pressable>
+  );
+}
+
+function Card({ children }) {
+  return <View style={styles.card}>{children}</View>;
+}
+
+function SectionTitle({ title }) {
+  return (
+    <Text style={styles.sectionTitle}>
+      {title}
+    </Text>
+  );
+}
+
+function Empty({ text }) {
+  return (
+    <View style={styles.empty}>
+      <Text>{text}</Text>
+    </View>
+  );
+}
+
+function Input({
   label,
   value,
   onChangeText,
-  placeholder,
   keyboardType,
-  secureTextEntry,
 }) {
   return (
-    <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
+    <View style={{ marginBottom: 14 }}>
+      <Text style={styles.inputLabel}>
+        {label}
+      </Text>
 
       <TextInput
         style={styles.input}
-        value={
-          value === undefined || value === null
-            ? ""
-            : String(value)
-        }
+        value={value}
         onChangeText={onChangeText}
-        placeholder={placeholder}
         keyboardType={keyboardType}
-        secureTextEntry={secureTextEntry}
-        autoCapitalize="none"
+        placeholder={label}
       />
     </View>
   );
 }
 
-function Choice({ title, active, onPress }) {
-  return (
-    <TouchableOpacity
-      style={[
-        styles.choice,
-        active && styles.choiceActive,
-      ]}
-      onPress={onPress}
-    >
-      <Text
-        style={
-          active
-            ? styles.choiceActiveText
-            : styles.bold
-        }
-      >
-        {title}
-      </Text>
-    </TouchableOpacity>
-  );
-}
-
-function Save({ title, onPress }) {
-  return (
-    <TouchableOpacity
-      style={styles.save}
-      onPress={onPress}
-    >
-      <Text style={styles.whiteBold}>{title}</Text>
-    </TouchableOpacity>
-  );
-}
-
-/* ---------------- STYLES ---------------- */
+/* =========================================================
+   STYLES
+========================================================= */
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f4f7fb",
+    backgroundColor: "#F5F7FA",
   },
 
-  content: {
-    padding: 16,
-    paddingBottom: 110,
-  },
-
-  loading: {
+  center: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#f4f7fb",
+    backgroundColor: "#F5F7FA",
+    padding: 24,
   },
 
-  lock: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 25,
-    backgroundColor: "#f4f7fb",
+  logo: {
+    fontSize: 30,
+    fontWeight: "800",
+    marginBottom: 8,
+  },
+
+  subtitle: {
+    color: "#666",
+    marginBottom: 20,
   },
 
   header: {
+    minHeight: 70,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    backgroundColor: "#FFFFFF",
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 18,
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
   },
 
-  brand: {
-    fontSize: 26,
-    fontWeight: "900",
-    marginTop: 8,
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: "800",
   },
 
-  sub: {
-    color: "#718096",
+  headerSub: {
+    color: "#6B7280",
+    fontSize: 12,
     marginTop: 3,
   },
 
   iconButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
-    backgroundColor: "#fff",
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#F1F5F9",
     alignItems: "center",
     justifyContent: "center",
-    elevation: 2,
+  },
+
+  content: {
+    padding: 16,
+    paddingBottom: 100,
+  },
+
+  pageTitle: {
+    fontSize: 26,
+    fontWeight: "800",
+    marginBottom: 16,
+  },
+
+  hero: {
+    backgroundColor: "#111827",
+    borderRadius: 22,
+    padding: 22,
+    marginBottom: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  heroSmall: {
+    color: "#CBD5E1",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 1,
+  },
+
+  score: {
+    color: "#FFFFFF",
+    fontSize: 38,
+    fontWeight: "900",
+    marginTop: 4,
+  },
+
+  heroText: {
+    color: "#E5E7EB",
+    marginTop: 2,
+  },
+
+  heroEmoji: {
+    fontSize: 48,
   },
 
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
-  },
-
-  card: {
-    width: "48%",
-    backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 17,
-    marginBottom: 12,
-    elevation: 2,
-  },
-
-  cardValue: {
-    fontSize: 19,
-    fontWeight: "900",
-    marginTop: 7,
-  },
-
-  actionGrid: {
-    flexDirection: "row",
     gap: 10,
     marginBottom: 10,
   },
 
-  bigButton: {
-    flex: 1,
-    backgroundColor: "#167a46",
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: "center",
-  },
-
-  lightButton: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#dde3e8",
-  },
-
-  expense: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#dde3e8",
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: "center",
-    marginBottom: 22,
-  },
-
-  heading: {
-    fontSize: 20,
-    fontWeight: "900",
-    marginBottom: 12,
-  },
-
-  tabs: {
-    flexDirection: "row",
-    backgroundColor: "#e7ecf1",
-    borderRadius: 13,
-    padding: 3,
-    marginBottom: 10,
-  },
-
-  tab: {
-    flex: 1,
-    paddingVertical: 11,
-    alignItems: "center",
-    borderRadius: 10,
-  },
-
-  activeTab: {
-    backgroundColor: "#fff",
-  },
-
-  search: {
-    backgroundColor: "#fff",
-    borderRadius: 13,
-    padding: 13,
-    borderWidth: 1,
-    borderColor: "#dde3e8",
-    marginBottom: 10,
-  },
-
-  party: {
-    backgroundColor: "#fff",
-    padding: 13,
-    borderRadius: 15,
-    marginBottom: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    elevation: 1,
-  },
-
-  avatar: {
-    width: 45,
-    height: 45,
-    borderRadius: 23,
-    backgroundColor: "#e5f4eb",
-    alignItems: "center",
+  stat: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 16,
+    width: "48%",
+    minHeight: 85,
     justifyContent: "center",
-    marginRight: 12,
   },
 
-  avatarText: {
-    color: "#167a46",
-    fontSize: 19,
-    fontWeight: "900",
+  statTitle: {
+    color: "#6B7280",
+    fontSize: 12,
+    marginBottom: 5,
   },
 
-  partyName: {
-    fontSize: 16,
-    fontWeight: "900",
-  },
-
-  amount: {
-    fontSize: 16,
-    fontWeight: "900",
-  },
-
-  red: {
-    color: "#d32f2f",
-  },
-
-  green: {
-    color: "#168653",
-  },
-
-  muted: {
-    color: "#718096",
-    marginTop: 3,
-  },
-
-  small: {
-    color: "#999",
-    fontSize: 11,
-    marginTop: 3,
-  },
-
-  bold: {
+  statValue: {
+    fontSize: 18,
     fontWeight: "800",
   },
 
-  whiteBold: {
-    color: "#fff",
-    fontWeight: "900",
-  },
-
-  empty: {
-    alignItems: "center",
-    padding: 35,
-  },
-
-  stats: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 16,
-    marginVertical: 15,
-  },
-
-  cardTitle: {
-    fontSize: 17,
-    fontWeight: "900",
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    marginTop: 18,
     marginBottom: 10,
   },
 
-  row: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 9,
-  },
-
-  transaction: {
-    backgroundColor: "#fff",
-    borderRadius: 13,
-    padding: 14,
-    marginBottom: 8,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
-  back: {
-    fontSize: 17,
-    fontWeight: "900",
-    marginBottom: 15,
-  },
-
-  profile: {
-    backgroundColor: "#fff",
-    borderRadius: 18,
-    padding: 20,
-    alignItems: "center",
-    marginBottom: 15,
-  },
-
-  bigAvatar: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: "#e5f4eb",
-    alignItems: "center",
+  action: {
+    width: "48%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 16,
+    minHeight: 95,
     justifyContent: "center",
   },
 
-  bigAvatarText: {
-    color: "#167a46",
-    fontSize: 29,
-    fontWeight: "900",
+  actionIcon: {
+    fontSize: 26,
+    marginBottom: 8,
   },
 
-  profileName: {
-    fontSize: 24,
-    fontWeight: "900",
-    marginTop: 10,
+  actionText: {
+    fontWeight: "700",
   },
 
-  bigBalance: {
-    fontSize: 30,
-    fontWeight: "900",
-    marginTop: 5,
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 17,
+    padding: 17,
+    marginBottom: 11,
   },
 
-  pageHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    marginBottom: 6,
+  },
+
+  cardText: {
+    color: "#6B7280",
+    lineHeight: 21,
   },
 
   smallButton: {
-    backgroundColor: "#167a46",
-    paddingHorizontal: 13,
-    paddingVertical: 11,
-    borderRadius: 11,
+    alignSelf: "flex-start",
+    backgroundColor: "#111827",
+    paddingHorizontal: 15,
+    paddingVertical: 9,
+    borderRadius: 10,
+    marginTop: 12,
   },
 
-  product: {
-    backgroundColor: "#fff",
-    borderRadius: 15,
-    padding: 15,
-    marginBottom: 9,
-    flexDirection: "row",
+  smallButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
   },
 
-  backup: {
-    backgroundColor: "#167a46",
+  primary: {
+    backgroundColor: "#111827",
     paddingVertical: 15,
+    paddingHorizontal: 18,
     borderRadius: 13,
     alignItems: "center",
-    marginTop: 15,
+    marginBottom: 12,
+  },
+
+  primaryText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 15,
+  },
+
+  secondary: {
+    backgroundColor: "#E5E7EB",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginBottom: 15,
+  },
+
+  cancel: {
+    alignItems: "center",
+    padding: 15,
+  },
+
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 6,
+    color: "#374151",
+  },
+
+  input: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 16,
+  },
+
+  pinInput: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 12,
+    padding: 14,
+    width: "80%",
+    textAlign: "center",
+    fontSize: 22,
+    marginVertical: 15,
+  },
+
+  balance: {
+    marginTop: 8,
+    fontWeight: "800",
+  },
+
+  due: {
+    color: "#DC2626",
+  },
+
+  clear: {
+    color: "#16A34A",
+  },
+
+  whatsapp: {
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+
+  whatsappText: {
+    fontWeight: "700",
+  },
+
+  amount: {
+    fontSize: 18,
+    fontWeight: "900",
+  },
+
+  report: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 9,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  reportTitle: {
+    color: "#6B7280",
+  },
+
+  reportValue: {
+    fontSize: 17,
+    fontWeight: "800",
+  },
+
+  menu: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 17,
+    marginBottom: 10,
+  },
+
+  menuTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+
+  menuSub: {
+    color: "#6B7280",
+    marginTop: 5,
   },
 
   bottom: {
@@ -2592,121 +1902,85 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "#fff",
+    height: 72,
+    backgroundColor: "#FFFFFF",
     borderTopWidth: 1,
-    borderTopColor: "#e4e8ec",
+    borderTopColor: "#E5E7EB",
     flexDirection: "row",
-    paddingVertical: 9,
-  },
-
-  bottomItem: {
-    flex: 1,
+    justifyContent: "space-around",
     alignItems: "center",
   },
 
-  overlay: {
+  navItem: {
+    alignItems: "center",
+    justifyContent: "center",
     flex: 1,
-    backgroundColor: "rgba(0,0,0,.48)",
-    justifyContent: "flex-end",
+  },
+
+  navIcon: {
+    fontSize: 21,
+  },
+
+  navText: {
+    fontSize: 10,
+    color: "#6B7280",
+    marginTop: 3,
+  },
+
+  navSelected: {
+    color: "#111827",
+    fontWeight: "800",
   },
 
   modal: {
-    backgroundColor: "#f6f8fa",
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
-    maxHeight: "94%",
+    flex: 1,
+    backgroundColor: "#F5F7FA",
     padding: 18,
   },
 
-  modalHeader: {
+  segment: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-
-  modalTitle: {
-    fontSize: 21,
-    fontWeight: "900",
-  },
-
-  contactButton: {
-    backgroundColor: "#167a46",
-    padding: 15,
-    borderRadius: 14,
-    alignItems: "center",
     marginBottom: 15,
+    gap: 8,
   },
 
-  field: {
-    marginBottom: 12,
-  },
-
-  label: {
-    fontSize: 13,
-    fontWeight: "800",
-    marginBottom: 6,
-  },
-
-  input: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#dfe4e8",
-    borderRadius: 12,
+  segmentButton: {
+    flex: 1,
     padding: 13,
-    fontSize: 15,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
   },
 
-  choices: {
+  segmentActive: {
+    backgroundColor: "#E5E7EB",
+  },
+
+  wrap: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 7,
+    gap: 8,
     marginBottom: 15,
   },
 
-  choice: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#ddd",
+  typeButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 11,
     borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    backgroundColor: "#FFFFFF",
   },
 
-  choiceActive: {
-    backgroundColor: "#222",
-    borderColor: "#222",
+  typeActive: {
+    backgroundColor: "#D1FAE5",
   },
 
-  choiceActiveText: {
-    color: "#fff",
-    fontWeight: "900",
-  },
-
-  save: {
-    backgroundColor: "#167a46",
-    paddingVertical: 15,
-    borderRadius: 13,
+  empty: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 15,
+    padding: 25,
     alignItems: "center",
-    marginTop: 6,
-  },
-
-  invoicePreview: {
-    backgroundColor: "#fff",
-    padding: 14,
-    borderRadius: 14,
-    marginBottom: 15,
-  },
-
-  pin: {
-    width: "80%",
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 13,
-    padding: 15,
-    textAlign: "center",
-    fontSize: 22,
-    marginTop: 20,
+    marginBottom: 10,
   },
 });
+
+export default App;

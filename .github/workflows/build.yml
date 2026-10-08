@@ -1,4 +1,3 @@
-
 name: Build Vyapar Khata AAB
 
 on:
@@ -27,16 +26,8 @@ jobs:
       - name: Check project
         shell: bash
         run: |
-          test -f package.json || {
-            echo "ERROR: package.json missing"
-            exit 1
-          }
-
-          test -f App.js || {
-            echo "ERROR: App.js missing"
-            exit 1
-          }
-
+          test -f package.json || exit 1
+          test -f App.js || exit 1
           echo "Project files OK"
 
       - name: Install dependencies
@@ -56,16 +47,12 @@ jobs:
             babel-preset-expo@11.0.10 \
             --legacy-peer-deps
 
-          echo "===== INSTALLED ASYNC STORAGE ====="
-          npm list @react-native-async-storage/async-storage || true
-
       - name: Configure Babel
         shell: bash
         run: |
           cat > babel.config.js <<'EOF'
           module.exports = function(api) {
             api.cache(true);
-
             return {
               presets: ["babel-preset-expo"]
             };
@@ -94,76 +81,33 @@ jobs:
 
           def make_png(path, width, height):
               row = b"\xff\xff\xff" * width
-              raw = b"".join(
-                  b"\x00" + row
-                  for _ in range(height)
-              )
+              raw = b"".join(b"\x00" + row for _ in range(height))
 
               def chunk(name, data):
                   return (
                       struct.pack(">I", len(data))
                       + name
                       + data
-                      + struct.pack(
-                          ">I",
-                          zlib.crc32(name + data) & 0xffffffff
-                      )
+                      + struct.pack(">I", zlib.crc32(name + data) & 0xffffffff)
                   )
 
               png = b"\x89PNG\r\n\x1a\n"
-
               png += chunk(
                   b"IHDR",
-                  struct.pack(
-                      ">IIBBBBB",
-                      width,
-                      height,
-                      8,
-                      2,
-                      0,
-                      0,
-                      0
-                  )
+                  struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
               )
-
-              png += chunk(
-                  b"IDAT",
-                  zlib.compress(raw, 9)
-              )
-
+              png += chunk(b"IDAT", zlib.compress(raw, 9))
               png += chunk(b"IEND", b"")
 
               Path(path).write_bytes(png)
 
-          make_png(
-              "assets/icon.png",
-              1024,
-              1024
-          )
+          make_png("assets/icon.png", 1024, 1024)
+          make_png("assets/adaptive-icon.png", 1024, 1024)
+          make_png("assets/splash.png", 1284, 2778)
+          make_png("assets/favicon.png", 48, 48)
 
-          make_png(
-              "assets/adaptive-icon.png",
-              1024,
-              1024
-          )
-
-          make_png(
-              "assets/splash.png",
-              1284,
-              2778
-          )
-
-          make_png(
-              "assets/favicon.png",
-              48,
-              48
-          )
-
-          print("All Expo assets created.")
+          print("Assets created.")
           PY
-
-          echo "===== ASSETS ====="
-          ls -lh assets/
 
       - name: Configure Expo
         env:
@@ -173,111 +117,61 @@ jobs:
           node <<'NODE'
           const fs = require("fs");
 
-          const run = Number(
-            process.env.RUN_NUMBER || "1"
-          );
+          const run = Number(process.env.RUN_NUMBER || "1");
 
           let app = {};
 
           if (fs.existsSync("app.json")) {
-            app = JSON.parse(
-              fs.readFileSync(
-                "app.json",
-                "utf8"
-              )
-            );
+            app = JSON.parse(fs.readFileSync("app.json", "utf8"));
           }
 
           app.expo = app.expo || {};
-          app.expo.android =
-            app.expo.android || {};
+          app.expo.android = app.expo.android || {};
 
-          app.expo.name =
-            "Vyapar Khata";
-
-          app.expo.slug =
-            "vyapar-khata";
-
-          app.expo.version =
-            `2.0.${run}`;
-
-          app.expo.orientation =
-            "portrait";
-
-          app.expo.icon =
-            "./assets/icon.png";
+          app.expo.name = "Vyapar Khata";
+          app.expo.slug = "vyapar-khata";
+          app.expo.version = `2.0.${run}`;
+          app.expo.orientation = "portrait";
+          app.expo.icon = "./assets/icon.png";
 
           app.expo.splash = {
-            image:
-              "./assets/splash.png",
-            resizeMode:
-              "contain",
-            backgroundColor:
-              "#ffffff"
+            image: "./assets/splash.png",
+            resizeMode: "contain",
+            backgroundColor: "#ffffff"
           };
 
-          app.expo.android.package =
-            "com.vyapar.khatabook.free";
-
-          app.expo.android.versionCode =
-            2000 + run;
-
-          app.expo.android.minSdkVersion =
-            24;
+          app.expo.android.package = "com.vyapar.khatabook.free";
+          app.expo.android.versionCode = 2000 + run;
+          app.expo.android.minSdkVersion = 24;
 
           app.expo.android.adaptiveIcon = {
-            foregroundImage:
-              "./assets/adaptive-icon.png",
-            backgroundColor:
-              "#ffffff"
+            foregroundImage: "./assets/adaptive-icon.png",
+            backgroundColor: "#ffffff"
           };
 
           app.expo.web = {
             ...(app.expo.web || {}),
-            favicon:
-              "./assets/favicon.png"
+            favicon: "./assets/favicon.png"
           };
 
           fs.writeFileSync(
             "app.json",
-            JSON.stringify(
-              app,
-              null,
-              2
-            ) + "\n"
+            JSON.stringify(app, null, 2) + "\n"
           );
 
-          console.log(
-            "Package:",
-            app.expo.android.package
-          );
-
-          console.log(
-            "Version:",
-            app.expo.version
-          );
-
-          console.log(
-            "VersionCode:",
-            app.expo.android.versionCode
-          );
-
-          console.log(
-            "MinSdk:",
-            app.expo.android.minSdkVersion
-          );
+          console.log("Package:", app.expo.android.package);
+          console.log("Version:", app.expo.version);
+          console.log("VersionCode:", app.expo.android.versionCode);
           NODE
 
       - name: Verify configuration
         shell: bash
         run: |
           npx expo config --type public
-
           test -f assets/icon.png
           test -f assets/adaptive-icon.png
           test -f assets/splash.png
           test -f assets/favicon.png
-
           echo "Configuration OK."
 
       - name: Check App.js syntax
@@ -290,13 +184,11 @@ jobs:
         shell: bash
         run: |
           rm -rf android
+          npx expo prebuild --platform android --clean --no-install
 
-          npx expo prebuild \
-            --platform android \
-            --clean \
-            --no-install
-
-            - name: Force Android SDK|
+      - name: Force Android SDK
+        shell: bash
+        run: |
           python3 <<'PY'
           from pathlib import Path
           import re
@@ -304,12 +196,23 @@ jobs:
           p = Path("android/app/build.gradle")
           text = p.read_text()
 
-          text = re.sub(r'minSdkVersion\s*=?\s*\d+', 'minSdkVersion 24', text)
-          text = re.sub(r'minSdk\s*=?\s*\d+', 'minSdk 24', text)
-          text = re.sub(r'compileSdkVersion\s*=?\s*\d+', 'compileSdkVersion 36', text)
-          text = re.sub(r'compileSdk\s*=?\s*\d+', 'compileSdk 36', text)
-          text = re.sub(r'targetSdkVersion\s*=?\s*\d+', 'targetSdkVersion 36', text)
-          text = re.sub(r'targetSdk\s*=?\s*\d+', 'targetSdk 36', text)
+          text = re.sub(
+              r'minSdkVersion\s*=?\s*\d+',
+              'minSdkVersion 24',
+              text
+          )
+
+          text = re.sub(
+              r'compileSdkVersion\s*=?\s*\d+',
+              'compileSdkVersion 36',
+              text
+          )
+
+          text = re.sub(
+              r'targetSdkVersion\s*=?\s*\d+',
+              'targetSdkVersion 36',
+              text
+          )
 
           p.write_text(text)
 
@@ -335,15 +238,14 @@ jobs:
           lines.append("android.suppressUnsupportedCompileSdk=36")
 
           if not any(x.startswith("org.gradle.jvmargs=") for x in lines):
-              lines.append("org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m")
+              lines.append(
+                  "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m"
+              )
 
           gp.write_text("\n".join(lines) + "\n")
 
           print("Android SDK configuration completed.")
           PY
-
-          echo "===== FINAL SDK VALUES ====="
-          grep -RniE "compileSdk|targetSdk" android/app android/gradle.properties || true
 
           echo "===== SDK CHECK ====="
           grep -RniE \
@@ -351,43 +253,24 @@ jobs:
             android/app \
             android/gradle.properties || true
 
-      - name: Verify AsyncStorage version
+      - name: Verify AsyncStorage
         shell: bash
         run: |
-          echo "===== ASYNC STORAGE ====="
-
-          npm list \
-            @react-native-async-storage/async-storage \
-            || true
-
-          echo "===== PACKAGE JSON ====="
-
-          grep -n \
-            "@react-native-async-storage/async-storage" \
-            package.json || true
+          npm list @react-native-async-storage/async-storage || true
 
       - name: Restore upload keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         shell: bash
         run: |
-          test -n "$KEYSTORE_BASE64" || {
-            echo "ERROR: KEYSTORE_BASE64 secret missing"
-            exit 1
-          }
+          test -n "$KEYSTORE_BASE64"
 
           mkdir -p android/app
 
-          printf '%s' \
-            "$KEYSTORE_BASE64" |
-            base64 --decode \
-            > android/app/upload-keystore.jks
+          printf '%s' "$KEYSTORE_BASE64" |
+            base64 --decode > android/app/upload-keystore.jks
 
-          test -s \
-            android/app/upload-keystore.jks || {
-            echo "ERROR: Keystore is empty"
-            exit 1
-          }
+          test -s android/app/upload-keystore.jks
 
           echo "Keystore restored successfully."
 
@@ -398,34 +281,17 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         shell: bash
         run: |
-          test -n "$KEYSTORE_PASSWORD" || {
-            echo "ERROR: KEYSTORE_PASSWORD missing"
-            exit 1
-          }
-
-          test -n "$KEY_ALIAS" || {
-            echo "ERROR: KEY_ALIAS missing"
-            exit 1
-          }
-
-          test -n "$KEY_PASSWORD" || {
-            echo "ERROR: KEY_PASSWORD missing"
-            exit 1
-          }
+          test -n "$KEYSTORE_PASSWORD"
+          test -n "$KEY_ALIAS"
+          test -n "$KEY_PASSWORD"
 
           python3 <<'PY'
           from pathlib import Path
 
-          p = Path(
-              "android/app/build.gradle"
-          )
-
+          p = Path("android/app/build.gradle")
           text = p.read_text()
 
-          if (
-              "storeFile file('upload-keystore.jks')"
-              not in text
-          ):
+          if "storeFile file('upload-keystore.jks')" not in text:
               marker = "signingConfigs {"
 
               block = """
@@ -438,15 +304,9 @@ jobs:
               """
 
               if marker not in text:
-                  raise SystemExit(
-                      "ERROR: signingConfigs not found"
-                  )
+                  raise SystemExit("ERROR: signingConfigs not found")
 
-              text = text.replace(
-                  marker,
-                  marker + block,
-                  1
-              )
+              text = text.replace(marker, marker + block, 1)
 
           text = text.replace(
               "signingConfig signingConfigs.debug",
@@ -455,9 +315,7 @@ jobs:
 
           p.write_text(text)
 
-          print(
-              "Release signing configured."
-          )
+          print("Release signing configured.")
           PY
 
       - name: Verify signing certificate
@@ -467,12 +325,9 @@ jobs:
         shell: bash
         run: |
           keytool -list -v \
-            -keystore \
-            android/app/upload-keystore.jks \
-            -storepass \
-            "$KEYSTORE_PASSWORD" \
-            -alias \
-            "$KEY_ALIAS"
+            -keystore android/app/upload-keystore.jks \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -alias "$KEY_ALIAS"
 
       - name: Build Android AAB
         env:
@@ -483,14 +338,8 @@ jobs:
         shell: bash
         run: |
           cd android
-
           chmod +x gradlew
-
-          ./gradlew \
-            clean \
-            bundleRelease \
-            --no-daemon \
-            --stacktrace
+          ./gradlew clean bundleRelease --no-daemon --stacktrace
 
       - name: Find AAB
         shell: bash
@@ -530,4 +379,3 @@ jobs:
           echo "VYAPAR KHATA AAB BUILD COMPLETE"
           echo "================================"
           echo "AAB artifact is ready."
-          echo "Go to Actions -> this run -> Artifacts"

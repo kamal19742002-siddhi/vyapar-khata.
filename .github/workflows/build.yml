@@ -164,118 +164,63 @@ jobs:
           fi
 
           echo "Android project created successfully."
+
+      - name: Check Android SDK
+        shell: bash
+        run: |
+          echo "Android project:"
           ls -la android
 
-      - name: Force Android SDK 36
-        shell: bash
-        working-directory: android
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("build.gradle")
-
-          if p.exists():
-              s = p.read_text()
-
-              s = s.replace(
-                  "compileSdkVersion = Integer.valueOf(findProperty('android.compileSdkVersion') ?: 34)",
-                  "compileSdkVersion = 36"
-              )
-
-              s = s.replace(
-                  "targetSdkVersion = Integer.valueOf(findProperty('android.targetSdkVersion') ?: 34)",
-                  "targetSdkVersion = 36"
-              )
-
-              p.write_text(s)
-          PY
+          echo "Gradle wrapper:"
+          ls -lh android/gradlew
 
       - name: Check signing secrets
         shell: bash
         run: |
           if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "ERROR: KEYSTORE_BASE64 missing"
+            echo "ERROR: KEYSTORE_BASE64 is missing"
             exit 1
           fi
 
           if [ -z "${{ secrets.KEYSTORE_PASSWORD }}" ]; then
-            echo "ERROR: KEYSTORE_PASSWORD missing"
+            echo "ERROR: KEYSTORE_PASSWORD is missing"
             exit 1
           fi
 
           if [ -z "${{ secrets.KEY_ALIAS }}" ]; then
-            echo "ERROR: KEY_ALIAS missing"
+            echo "ERROR: KEY_ALIAS is missing"
             exit 1
           fi
 
           if [ -z "${{ secrets.KEY_PASSWORD }}" ]; then
-            echo "ERROR: KEY_PASSWORD missing"
+            echo "ERROR: KEY_PASSWORD is missing"
             exit 1
           fi
 
-          echo "Signing secrets found."
+          echo "All signing secrets are available."
 
       - name: Restore signing keystore
         shell: bash
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/vyapar-upload.jks
 
-          if [ ! -f android/app/vyapar-upload.jks ]; then
-            echo "ERROR: Keystore file was not created."
+          if [ ! -s "android/app/vyapar-upload.jks" ]; then
+            echo "ERROR: Keystore file is empty or was not created."
             exit 1
           fi
 
-          ls -lh android/app/vyapar-upload.jks
+          echo "Keystore restored successfully."
 
-      - name: Configure release signing
+      - name: Verify keystore
         shell: bash
-        working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("app/build.gradle")
-          s = p.read_text()
-
-          signing_block = """
-              signingConfigs {
-                  release {
-                      storeFile file("vyapar-upload.jks")
-                      storePassword System.getenv("KEYSTORE_PASSWORD")
-                      keyAlias System.getenv("KEY_ALIAS")
-                      keyPassword System.getenv("KEY_PASSWORD")
-                  }
-              }
-          """
-
-          if "signingConfigs {" not in s:
-              s = s.replace(
-                  "android {",
-                  "android {" + "\n" + signing_block,
-                  1
-              )
-
-          s = s.replace(
-              "signingConfig signingConfigs.debug",
-              "signingConfig signingConfigs.release"
-          )
-
-          if "signingConfig signingConfigs.release" not in s:
-              s = s.replace(
-                  "buildTypes {",
-                  """buildTypes {
-                  release {
-                      signingConfig signingConfigs.release
-                  }
-              """,
-                  1
-              )
-
-          p.write_text(s)
-          PY
-
-          echo "Release signing configured."
+          keytool -list \
+            -keystore android/app/vyapar-upload.jks \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -alias "$KEY_ALIAS"
 
       - name: Build Release AAB
         working-directory: android
@@ -289,23 +234,28 @@ jobs:
 
           ./gradlew clean
 
-          ./gradlew bundleRelease --stacktrace
+          ./gradlew bundleRelease \
+            --stacktrace \
+            -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/android/app/vyapar-upload.jks" \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
 
       - name: Verify AAB
         shell: bash
         run: |
-          echo "Checking generated AAB..."
-
-          ls -lh android/app/build/outputs/bundle/release/
+          echo "Checking AAB..."
 
           if [ ! -f "android/app/build/outputs/bundle/release/app-release.aab" ]; then
-            echo "ERROR: AAB NOT FOUND"
+            echo "ERROR: app-release.aab was not generated."
             exit 1
           fi
 
-          echo "================================"
-          echo "AAB BUILD SUCCESSFUL"
-          echo "================================"
+          ls -lh android/app/build/outputs/bundle/release/app-release.aab
+
+          echo "=========================================="
+          echo "       AAB BUILD SUCCESSFUL"
+          echo "=========================================="
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4

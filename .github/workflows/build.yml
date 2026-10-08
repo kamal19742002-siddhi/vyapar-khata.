@@ -461,7 +461,3 @@ jobs:
           echo "Version Code: ${VERSION_CODE}"
           echo "AAB: app-release.aab"
           echo "======================================"
-```- SDK 36
-- AAB output `app-release.aab`
-
-सबसे महत्वपूर्ण: **पुराने build.yml का कोई हिस्सा साथ में न रखें**, खासकर पुराना `Configure Signing Directly` step।

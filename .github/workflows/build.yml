@@ -22,7 +22,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
 
       - name: Create package.json
         shell: bash
@@ -151,6 +150,22 @@ jobs:
         run: |
           npx expo prebuild --platform android --clean --no-install
 
+      - name: Verify Android project
+        shell: bash
+        run: |
+          if [ ! -d "android" ]; then
+            echo "ERROR: Android project was not created."
+            exit 1
+          fi
+
+          if [ ! -f "android/gradlew" ]; then
+            echo "ERROR: Gradle wrapper was not created."
+            exit 1
+          fi
+
+          echo "Android project created successfully."
+          ls -la android
+
       - name: Force Android SDK 36
         shell: bash
         working-directory: android
@@ -207,7 +222,7 @@ jobs:
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/vyapar-upload.jks
 
           if [ ! -f android/app/vyapar-upload.jks ]; then
-            echo "ERROR: Keystore file not created"
+            echo "ERROR: Keystore file was not created."
             exit 1
           fi
 
@@ -216,10 +231,6 @@ jobs:
       - name: Configure release signing
         shell: bash
         working-directory: android
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -241,9 +252,14 @@ jobs:
           if "signingConfigs {" not in s:
               s = s.replace(
                   "android {",
-                  "android {\n" + signing_block,
+                  "android {" + "\n" + signing_block,
                   1
               )
+
+          s = s.replace(
+              "signingConfig signingConfigs.debug",
+              "signingConfig signingConfigs.release"
+          )
 
           if "signingConfig signingConfigs.release" not in s:
               s = s.replace(
@@ -255,11 +271,6 @@ jobs:
               """,
                   1
               )
-
-          s = s.replace(
-              "signingConfig signingConfigs.debug",
-              "signingConfig signingConfigs.release"
-          )
 
           p.write_text(s)
           PY
@@ -287,7 +298,7 @@ jobs:
 
           ls -lh android/app/build/outputs/bundle/release/
 
-          if [ ! -f android/app/build/outputs/bundle/release/app-release.aab ]; then
+          if [ ! -f "android/app/build/outputs/bundle/release/app-release.aab" ]; then
             echo "ERROR: AAB NOT FOUND"
             exit 1
           fi

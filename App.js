@@ -1,5 +1,4 @@
-
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   SafeAreaView,
   View,
@@ -13,10 +12,13 @@ import {
   Linking,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Contacts from "expo-contacts";
 
 const DATA_KEY = "@vyapar_khata_data_v3";
+const BACKUP_KEY = "@vyapar_khata_backup_v3";
 const PIN_KEY = "@vyapar_khata_pin_v3";
 
 const EMPTY_DATA = {
@@ -66,22 +68,38 @@ function inputValue(value) {
   return value === undefined || value === null ? "" : String(value);
 }
 
+function normalizeData(x) {
+  return {
+    ...EMPTY_DATA,
+    ...(x || {}),
+    business: {
+      ...EMPTY_DATA.business,
+      ...((x && x.business) || {}),
+    },
+    customers: Array.isArray(x?.customers) ? x.customers : [],
+    suppliers: Array.isArray(x?.suppliers) ? x.suppliers : [],
+    transactions: Array.isArray(x?.transactions)
+      ? x.transactions
+      : [],
+    expenses: Array.isArray(x?.expenses) ? x.expenses : [],
+  };
+}
+
 export default function App() {
   const [data, setData] = useState(EMPTY_DATA);
-  const [ready, setReady] = useState(false);
+  const dataRef = useRef(EMPTY_DATA);
 
+  const [ready, setReady] = useState(false);
   const [page, setPage] = useState("home");
   const [tab, setTab] = useState("customers");
-
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState("");
-
   const [modal, setModal] = useState("");
   const [form, setForm] = useState({});
-
   const [pin, setPin] = useState("");
   const [savedPin, setSavedPin] = useState("");
   const [locked, setLocked] = useState(false);
+  const [contactLoading, setContactLoading] = useState(false);
 
   useEffect(() => {
     load();
@@ -89,36 +107,47 @@ export default function App() {
 
   async function load() {
     try {
-      const d = await AsyncStorage.getItem(DATA_KEY);
-      const p = await AsyncStorage.getItem(PIN_KEY);
+      const [primary, backup, storedPin] =
+        await Promise.all([
+          AsyncStorage.getItem(DATA_KEY),
+          AsyncStorage.getItem(BACKUP_KEY),
+          AsyncStorage.getItem(PIN_KEY),
+        ]);
 
-      if (d) {
-        const x = JSON.parse(d);
+      let loaded = null;
 
-        setData({
-          ...EMPTY_DATA,
-          ...x,
-          business: {
-            ...EMPTY_DATA.business,
-            ...(x.business || {}),
-          },
-          customers: Array.isArray(x.customers)
-            ? x.customers
-            : [],
-          suppliers: Array.isArray(x.suppliers)
-            ? x.suppliers
-            : [],
-          transactions: Array.isArray(x.transactions)
-            ? x.transactions
-            : [],
-          expenses: Array.isArray(x.expenses)
-            ? x.expenses
-            : [],
-        });
+      try {
+        if (primary) loaded = normalizeData(JSON.parse(primary));
+      } catch {}
+
+      let backupData = null;
+
+      try {
+        if (backup) {
+          backupData = normalizeData(JSON.parse(backup));
+        }
+      } catch {}
+
+      const primaryHasData =
+        loaded &&
+        (
+          loaded.customers.length > 0 ||
+          loaded.suppliers.length > 0 ||
+          loaded.transactions.length > 0 ||
+          loaded.expenses.length > 0
+        );
+
+      if (!primaryHasData && backupData) {
+        loaded = backupData;
       }
 
-      if (p) {
-        setSavedPin(p);
+      const finalData = loaded || EMPTY_DATA;
+
+      dataRef.current = finalData;
+      setData(finalData);
+
+      if (storedPin) {
+        setSavedPin(storedPin);
         setLocked(true);
       }
     } catch (e) {
@@ -128,29 +157,39 @@ export default function App() {
     setReady(true);
   }
 
-  useEffect(() => {
-    if (ready) {
-      AsyncStorage.setItem(
-        DATA_KEY,
-        JSON.stringify(data)
-      ).catch((e) => console.log("Save error:", e));
+  async function persist(next) {
+    const json = JSON.stringify(next);
+
+    try {
+      await AsyncStorage.setItem(DATA_KEY, json);
+      await AsyncStorage.setItem(BACKUP_KEY, json);
+    } catch (e) {
+      console.log("Save error:", e);
     }
-  }, [data, ready]);
+  }
+
+  function updateData(updater) {
+    const next =
+      typeof updater === "function"
+        ? updater(dataRef.current)
+        : updater;
+
+    dataRef.current = next;
+    setData(next);
+    persist(next);
+  }
 
   function balance(party) {
     let b = num(party.openingBalance);
 
-    if (party.balanceType === "advance") {
-      b = -b;
-    }
+    if (party.balanceType === "advance") b = -b;
 
     data.transactions.forEach((t) => {
       if (
         t.partyId !== party.id ||
         t.partyType !== party.type
-      ) {
+      )
         return;
-      }
 
       if (party.type === "customer") {
         if (t.type === "sale") b += num(t.amount);
@@ -170,28 +209,22 @@ export default function App() {
 
   const customers = useMemo(() => {
     const q = search.toLowerCase().trim();
-
     if (!q) return data.customers;
 
     return data.customers.filter(
       (x) =>
-        String(x.name || "")
-          .toLowerCase()
-          .includes(q) ||
+        String(x.name || "").toLowerCase().includes(q) ||
         String(x.phone || "").includes(q)
     );
   }, [data.customers, search]);
 
   const suppliers = useMemo(() => {
     const q = search.toLowerCase().trim();
-
     if (!q) return data.suppliers;
 
     return data.suppliers.filter(
       (x) =>
-        String(x.name || "")
-          .toLowerCase()
-          .includes(q) ||
+        String(x.name || "").toLowerCase().includes(q) ||
         String(x.phone || "").includes(q)
     );
   }, [data.suppliers, search]);
@@ -200,10 +233,7 @@ export default function App() {
     (s, p) =>
       s +
       Math.max(
-        balance({
-          ...p,
-          type: "customer",
-        }),
+        balance({ ...p, type: "customer" }),
         0
       ),
     0
@@ -213,10 +243,7 @@ export default function App() {
     (s, p) =>
       s +
       Math.max(
-        balance({
-          ...p,
-          type: "supplier",
-        }),
+        balance({ ...p, type: "supplier" }),
         0
       ),
     0
@@ -246,15 +273,13 @@ export default function App() {
   function openParty(type, party = null) {
     setForm(
       party
-        ? {
-            ...party,
-            type,
-          }
+        ? { ...party, type }
         : {
             name: "",
             phone: "",
             address: "",
             gst: "",
+            email: "",
             openingBalance: "",
             balanceType: "due",
             type,
@@ -270,6 +295,69 @@ export default function App() {
     );
   }
 
+  // NEW: Android Contacts Picker
+  async function pickContact() {
+    try {
+      setContactLoading(true);
+
+      const permission =
+        await Contacts.requestPermissionsAsync();
+
+      if (permission.status !== "granted") {
+        Alert.alert(
+          "Contacts Permission",
+          "Customer/Supplier ka data automatically lene ke liye Contacts permission allow karein."
+        );
+        return;
+      }
+
+      const result =
+        await Contacts.presentContactPickerAsync();
+
+      if (!result || !result.contact) return;
+
+      const contact = result.contact;
+
+      const phone =
+        contact.phoneNumbers?.[0]?.number || "";
+
+      const email =
+        contact.emails?.[0]?.email || "";
+
+      const address =
+        contact.addresses?.[0]
+          ? [
+              contact.addresses[0].street,
+              contact.addresses[0].city,
+              contact.addresses[0].region,
+              contact.addresses[0].postalCode,
+            ]
+              .filter(Boolean)
+              .join(", ")
+          : "";
+
+      setForm((old) => ({
+        ...old,
+        name:
+          contact.name ||
+          contact.firstName ||
+          old.name ||
+          "",
+        phone,
+        email,
+        address,
+      }));
+    } catch (e) {
+      console.log("Contact picker error:", e);
+      Alert.alert(
+        "Contacts",
+        "Contact select nahi ho saka."
+      );
+    } finally {
+      setContactLoading(false);
+    }
+  }
+
   function saveParty() {
     if (!String(form.name || "").trim()) {
       Alert.alert("Required", "Name enter karein.");
@@ -278,9 +366,7 @@ export default function App() {
 
     const type =
       form.type ||
-      (modal === "supplier"
-        ? "supplier"
-        : "customer");
+      (modal === "supplier" ? "supplier" : "customer");
 
     const party = {
       id: form.id || uid(type),
@@ -289,11 +375,12 @@ export default function App() {
       phone: inputValue(form.phone),
       address: inputValue(form.address),
       gst: inputValue(form.gst),
+      email: inputValue(form.email),
       openingBalance: num(form.openingBalance),
       balanceType: form.balanceType || "due",
     };
 
-    setData((old) => {
+    updateData((old) => {
       const key =
         type === "customer"
           ? "customers"
@@ -316,6 +403,11 @@ export default function App() {
 
     setModal("");
     setForm({});
+
+    Alert.alert(
+      "Saved",
+      `${type === "customer" ? "Customer" : "Supplier"} saved successfully.`
+    );
   }
 
   function deleteParty(party) {
@@ -323,10 +415,7 @@ export default function App() {
       "Delete",
       `Delete ${party.name}?`,
       [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
+        { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
           style: "destructive",
@@ -336,10 +425,17 @@ export default function App() {
                 ? "suppliers"
                 : "customers";
 
-            setData((old) => ({
+            updateData((old) => ({
               ...old,
               [key]: old[key].filter(
                 (x) => x.id !== party.id
+              ),
+              transactions: old.transactions.filter(
+                (x) =>
+                  !(
+                    x.partyId === party.id &&
+                    x.partyType === party.type
+                  )
               ),
             }));
 
@@ -352,11 +448,7 @@ export default function App() {
   }
 
   function openPartyDetails(party, type) {
-    setSelected({
-      ...party,
-      type,
-    });
-
+    setSelected({ ...party, type });
     setPage("party");
   }
 
@@ -381,10 +473,7 @@ export default function App() {
     const amount = num(form.amount);
 
     if (!amount || amount <= 0) {
-      Alert.alert(
-        "Amount",
-        "Valid amount enter karein."
-      );
+      Alert.alert("Amount", "Valid amount enter karein.");
       return;
     }
 
@@ -404,7 +493,7 @@ export default function App() {
       createdAt: Date.now(),
     };
 
-    setData((old) => ({
+    updateData((old) => ({
       ...old,
       transactions: [
         transaction,
@@ -438,10 +527,7 @@ export default function App() {
     const amount = num(form.amount);
 
     if (!amount || amount <= 0) {
-      Alert.alert(
-        "Amount",
-        "Valid amount enter karein."
-      );
+      Alert.alert("Amount", "Valid amount enter karein.");
       return;
     }
 
@@ -461,7 +547,7 @@ export default function App() {
       createdAt: Date.now(),
     };
 
-    setData((old) => ({
+    updateData((old) => ({
       ...old,
       transactions: [
         tx,
@@ -493,18 +579,12 @@ export default function App() {
     const amount = num(form.amount);
 
     if (!String(form.title || "").trim()) {
-      Alert.alert(
-        "Required",
-        "Expense name enter karein."
-      );
+      Alert.alert("Required", "Expense name enter karein.");
       return;
     }
 
     if (!amount || amount <= 0) {
-      Alert.alert(
-        "Amount",
-        "Valid amount enter karein."
-      );
+      Alert.alert("Amount", "Valid amount enter karein.");
       return;
     }
 
@@ -518,12 +598,9 @@ export default function App() {
       createdAt: Date.now(),
     };
 
-    setData((old) => ({
+    updateData((old) => ({
       ...old,
-      expenses: [
-        expense,
-        ...old.expenses,
-      ],
+      expenses: [expense, ...old.expenses],
     }));
 
     setModal("");
@@ -535,15 +612,12 @@ export default function App() {
   }
 
   function openBusiness() {
-    setForm({
-      ...data.business,
-    });
-
+    setForm({ ...data.business });
     setModal("business");
   }
 
   function saveBusiness() {
-    setData((old) => ({
+    updateData((old) => ({
       ...old,
       business: {
         name:
@@ -560,10 +634,7 @@ export default function App() {
 
   async function callParty() {
     if (!selected?.phone) {
-      Alert.alert(
-        "Phone",
-        "Phone number available nahi hai."
-      );
+      Alert.alert("Phone", "Phone number available nahi hai.");
       return;
     }
 
@@ -574,11 +645,8 @@ export default function App() {
 
     try {
       await Linking.openURL(`tel:${phone}`);
-    } catch (e) {
-      Alert.alert(
-        "Error",
-        "Phone app open nahi ho saka."
-      );
+    } catch {
+      Alert.alert("Error", "Phone app open nahi ho saka.");
     }
   }
 
@@ -598,13 +666,15 @@ export default function App() {
       `${data.business.name}\n` +
       `Your current balance: ${money(
         Math.abs(balanceAmount)
-      )}\n\n` +
-      `Thank you.`;
+      )}\n\nThank you.`;
 
-    const phone = String(selected.phone).replace(
+    let phone = String(selected.phone).replace(
       /[^0-9]/g,
       ""
     );
+
+    // Indian numbers
+    if (phone.length === 10) phone = "91" + phone;
 
     const url =
       `https://wa.me/${phone}?text=` +
@@ -612,7 +682,7 @@ export default function App() {
 
     try {
       await Linking.openURL(url);
-    } catch (e) {
+    } catch {
       Alert.alert(
         "WhatsApp",
         "WhatsApp open nahi ho saka."
@@ -621,10 +691,7 @@ export default function App() {
   }
 
   function setPinForApp() {
-    setForm({
-      newPin: "",
-    });
-
+    setForm({ newPin: "" });
     setModal("setPin");
   }
 
@@ -640,49 +707,33 @@ export default function App() {
     }
 
     try {
-      await AsyncStorage.setItem(
-        PIN_KEY,
-        newPin
-      );
-
+      await AsyncStorage.setItem(PIN_KEY, newPin);
       setSavedPin(newPin);
       setLocked(false);
       setPin("");
       setModal("");
 
-      Alert.alert(
-        "PIN Saved",
-        "App PIN successfully set."
-      );
-    } catch (e) {
-      Alert.alert(
-        "Error",
-        "PIN save nahi ho saka."
-      );
+      Alert.alert("PIN Saved", "App PIN successfully set.");
+    } catch {
+      Alert.alert("Error", "PIN save nahi ho saka.");
     }
   }
 
-  async function unlock() {
+  function unlock() {
     if (pin === savedPin) {
       setLocked(false);
       setPin("");
     } else {
-      Alert.alert(
-        "Wrong PIN",
-        "PIN incorrect hai."
-      );
+      Alert.alert("Wrong PIN", "PIN incorrect hai.");
     }
   }
 
-  async function removePin() {
+  function removePin() {
     Alert.alert(
       "Remove PIN",
       "App PIN remove karna hai?",
       [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
+        { text: "Cancel", style: "cancel" },
         {
           text: "Remove",
           style: "destructive",
@@ -696,23 +747,22 @@ export default function App() {
     );
   }
 
-  function transactionTitle(t) {
-    return titleFor(t.type);
-  }
-
   function renderHome() {
+    const list =
+      tab === "customers" ? customers : suppliers;
+
     return (
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.header}>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={styles.brand}>
               {data.business.name}
             </Text>
             <Text style={styles.subBrand}>
-              Vyapar Management
+              Smart Business Ledger
             </Text>
           </View>
 
@@ -720,48 +770,31 @@ export default function App() {
             style={styles.settingsButton}
             onPress={openBusiness}
           >
-            <Text style={styles.settingsText}>
-              ⚙
-            </Text>
+            <Text style={styles.settingsText}>⚙️</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.summaryGrid}>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>
-              Receivable
-            </Text>
-            <Text style={styles.receivable}>
-              {money(receivable)}
-            </Text>
-          </View>
-
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>
-              Payable
-            </Text>
-            <Text style={styles.payable}>
-              {money(payable)}
-            </Text>
-          </View>
-
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>
-              Sales
-            </Text>
-            <Text style={styles.summaryValue}>
-              {money(sales)}
-            </Text>
-          </View>
-
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>
-              Purchases
-            </Text>
-            <Text style={styles.summaryValue}>
-              {money(purchases)}
-            </Text>
-          </View>
+          <Summary
+            title="Receivable"
+            value={money(receivable)}
+            type="red"
+          />
+          <Summary
+            title="Payable"
+            value={money(payable)}
+            type="orange"
+          />
+          <Summary
+            title="Sales"
+            value={money(sales)}
+            type="green"
+          />
+          <Summary
+            title="Purchases"
+            value={money(purchases)}
+            type="blue"
+          />
         </View>
 
         <View style={styles.actionRow}>
@@ -770,7 +803,7 @@ export default function App() {
             onPress={() => openParty("customer")}
           >
             <Text style={styles.primaryButtonText}>
-              + Customer
+              ＋ Customer
             </Text>
           </TouchableOpacity>
 
@@ -779,7 +812,7 @@ export default function App() {
             onPress={() => openParty("supplier")}
           >
             <Text style={styles.secondaryButtonText}>
-              + Supplier
+              ＋ Supplier
             </Text>
           </TouchableOpacity>
         </View>
@@ -789,32 +822,23 @@ export default function App() {
           onPress={openExpense}
         >
           <Text style={styles.expenseButtonText}>
-            + Add Expense
+            ＋ Add Expense
           </Text>
         </TouchableOpacity>
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
-            Parties
-          </Text>
-        </View>
+        <Text style={styles.sectionTitle}>
+          Parties
+        </Text>
 
         <View style={styles.tabs}>
           <TouchableOpacity
             style={[
               styles.tab,
-              tab === "customers" &&
-                styles.activeTab,
+              tab === "customers" && styles.activeTab,
             ]}
             onPress={() => setTab("customers")}
           >
-            <Text
-              style={[
-                styles.tabText,
-                tab === "customers" &&
-                  styles.activeTabText,
-              ]}
-            >
+            <Text style={styles.tabText}>
               Customers ({data.customers.length})
             </Text>
           </TouchableOpacity>
@@ -822,18 +846,11 @@ export default function App() {
           <TouchableOpacity
             style={[
               styles.tab,
-              tab === "suppliers" &&
-                styles.activeTab,
+              tab === "suppliers" && styles.activeTab,
             ]}
             onPress={() => setTab("suppliers")}
           >
-            <Text
-              style={[
-                styles.tabText,
-                tab === "suppliers" &&
-                  styles.activeTabText,
-              ]}
-            >
+            <Text style={styles.tabText}>
               Suppliers ({data.suppliers.length})
             </Text>
           </TouchableOpacity>
@@ -841,15 +858,12 @@ export default function App() {
 
         <TextInput
           style={styles.search}
-          placeholder="Search name or phone"
+          placeholder="🔎  Search party or phone"
           value={search}
           onChangeText={setSearch}
         />
 
-        {(tab === "customers"
-          ? customers
-          : suppliers
-        ).map((party) => {
+        {list.map((party) => {
           const type =
             tab === "customers"
               ? "customer"
@@ -868,11 +882,18 @@ export default function App() {
                 openPartyDetails(party, type)
               }
             >
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>
+                  {(party.name || "?")
+                    .charAt(0)
+                    .toUpperCase()}
+                </Text>
+              </View>
+
               <View style={styles.partyInfo}>
                 <Text style={styles.partyName}>
                   {party.name}
                 </Text>
-
                 <Text style={styles.partyPhone}>
                   {party.phone || "No phone"}
                 </Text>
@@ -894,17 +915,14 @@ export default function App() {
           );
         })}
 
-        {(tab === "customers"
-          ? customers
-          : suppliers
-        ).length === 0 && (
+        {list.length === 0 && (
           <View style={styles.empty}>
+            <Text style={styles.emptyIcon}>👥</Text>
             <Text style={styles.emptyTitle}>
               No {tab} yet
             </Text>
-
             <Text style={styles.emptyText}>
-              Add your first {tab.slice(0, -1)}.
+              Add a party from your phone contacts.
             </Text>
           </View>
         )}
@@ -914,77 +932,62 @@ export default function App() {
             Cash Summary
           </Text>
 
-          <View style={styles.statRow}>
-            <Text>Received</Text>
-            <Text style={styles.greenText}>
-              {money(received)}
-            </Text>
-          </View>
-
-          <View style={styles.statRow}>
-            <Text>Given</Text>
-            <Text style={styles.redText}>
-              {money(given)}
-            </Text>
-          </View>
-
-          <View style={styles.statRow}>
-            <Text>Expenses</Text>
-            <Text style={styles.redText}>
-              {money(expenses)}
-            </Text>
-          </View>
+          <StatRow
+            title="Received"
+            value={money(received)}
+            positive
+          />
+          <StatRow
+            title="Given"
+            value={money(given)}
+          />
+          <StatRow
+            title="Expenses"
+            value={money(expenses)}
+          />
         </View>
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
-            Recent Transactions
-          </Text>
-        </View>
+        <Text style={styles.sectionTitle}>
+          Recent Transactions
+        </Text>
 
-        {data.transactions
-          .slice(0, 10)
-          .map((t) => (
-            <View
-              key={t.id}
-              style={styles.transactionCard}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={styles.transactionName}>
-                  {t.partyName}
-                </Text>
+        {data.transactions.slice(0, 10).map((t) => (
+          <View
+            key={t.id}
+            style={styles.transactionCard}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.transactionName}>
+                {t.partyName}
+              </Text>
 
-                <Text style={styles.transactionType}>
-                  {transactionTitle(t)}
-                </Text>
+              <Text style={styles.transactionType}>
+                {titleFor(t.type)}
+              </Text>
 
-                <Text style={styles.transactionDate}>
-                  {t.date}
-                </Text>
-              </View>
-
-              <Text
-                style={[
-                  styles.transactionAmount,
-                  t.type === "received" ||
-                  t.type === "purchase"
-                    ? styles.greenText
-                    : styles.redText,
-                ]}
-              >
-                {money(t.amount)}
+              <Text style={styles.transactionDate}>
+                {t.date}
               </Text>
             </View>
-          ))}
+
+            <Text
+              style={[
+                styles.transactionAmount,
+                t.type === "received"
+                  ? styles.greenText
+                  : styles.redText,
+              ]}
+            >
+              {money(t.amount)}
+            </Text>
+          </View>
+        ))}
       </ScrollView>
     );
   }
 
   function renderParty() {
-    if (!selected) {
-      setPage("home");
-      return null;
-    }
+    if (!selected) return null;
 
     const b = balance(selected);
 
@@ -1007,12 +1010,18 @@ export default function App() {
             setSelected(null);
           }}
         >
-          <Text style={styles.backText}>
-            ← Back
-          </Text>
+          <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
 
         <View style={styles.profileCard}>
+          <View style={styles.bigAvatar}>
+            <Text style={styles.bigAvatarText}>
+              {(selected.name || "?")
+                .charAt(0)
+                .toUpperCase()}
+            </Text>
+          </View>
+
           <Text style={styles.profileName}>
             {selected.name}
           </Text>
@@ -1020,6 +1029,12 @@ export default function App() {
           <Text style={styles.profilePhone}>
             {selected.phone || "No phone"}
           </Text>
+
+          {selected.email ? (
+            <Text style={styles.profileDetail}>
+              {selected.email}
+            </Text>
+          ) : null}
 
           {selected.address ? (
             <Text style={styles.profileDetail}>
@@ -1093,10 +1108,9 @@ export default function App() {
 
           <TouchableOpacity
             style={styles.normalAction}
-            onPress={() => openParty(
-              selected.type,
-              selected
-            )}
+            onPress={() =>
+              openParty(selected.type, selected)
+            }
           >
             <Text style={styles.normalActionText}>
               Edit
@@ -1119,7 +1133,7 @@ export default function App() {
             onPress={whatsappParty}
           >
             <Text style={styles.contactText}>
-              WhatsApp
+              💬 WhatsApp
             </Text>
           </TouchableOpacity>
         </View>
@@ -1167,12 +1181,9 @@ export default function App() {
 
         {transactions.length === 0 && (
           <View style={styles.empty}>
+            <Text style={styles.emptyIcon}>📒</Text>
             <Text style={styles.emptyTitle}>
               No transactions
-            </Text>
-
-            <Text style={styles.emptyText}>
-              Payment or sale/purchase add karein.
             </Text>
           </View>
         )}
@@ -1181,13 +1192,16 @@ export default function App() {
   }
 
   function renderModal() {
-    const visible = Boolean(modal);
+    if (!modal) return null;
 
-    if (!visible) return null;
+    const partyModal =
+      modal === "customer" ||
+      modal === "supplier" ||
+      modal === "editParty";
 
     return (
       <Modal
-        visible={visible}
+        visible
         transparent
         animationType="slide"
         onRequestClose={() => setModal("")}
@@ -1204,7 +1218,7 @@ export default function App() {
             <ScrollView
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={{
-                paddingBottom: 20,
+                paddingBottom: 30,
               }}
             >
               <View style={styles.modalHeader}>
@@ -1233,24 +1247,43 @@ export default function App() {
                 <TouchableOpacity
                   onPress={() => setModal("")}
                 >
-                  <Text style={styles.closeText}>
-                    ✕
-                  </Text>
+                  <Text style={styles.closeText}>✕</Text>
                 </TouchableOpacity>
               </View>
 
-              {(modal === "customer" ||
-                modal === "supplier" ||
-                modal === "editParty") && (
+              {partyModal && (
                 <>
+                  {!form.id && (
+                    <TouchableOpacity
+                      style={styles.contactPickerButton}
+                      onPress={pickContact}
+                      disabled={contactLoading}
+                    >
+                      {contactLoading ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <>
+                          <Text style={styles.contactPickerIcon}>
+                            👤
+                          </Text>
+                          <View>
+                            <Text style={styles.contactPickerTitle}>
+                              Choose from Contacts
+                            </Text>
+                            <Text style={styles.contactPickerSub}>
+                              Name & phone automatically fill honge
+                            </Text>
+                          </View>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
+
                   <Field
                     label="Name"
                     value={form.name}
                     onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        name: v,
-                      })
+                      setForm({ ...form, name: v })
                     }
                     placeholder="Party name"
                   />
@@ -1259,23 +1292,27 @@ export default function App() {
                     label="Phone"
                     value={form.phone}
                     onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        phone: v,
-                      })
+                      setForm({ ...form, phone: v })
                     }
                     placeholder="Phone number"
                     keyboardType="phone-pad"
                   />
 
                   <Field
+                    label="Email"
+                    value={form.email}
+                    onChangeText={(v) =>
+                      setForm({ ...form, email: v })
+                    }
+                    placeholder="Email"
+                    keyboardType="email-address"
+                  />
+
+                  <Field
                     label="Address"
                     value={form.address}
                     onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        address: v,
-                      })
+                      setForm({ ...form, address: v })
                     }
                     placeholder="Address"
                   />
@@ -1284,10 +1321,7 @@ export default function App() {
                     label="GST"
                     value={form.gst}
                     onChangeText={(v) =>
-                      setForm({
-                        ...form,
-                        gst: v,
-                      })
+                      setForm({ ...form, gst: v })
                     }
                     placeholder="GST number"
                   />
@@ -1315,8 +1349,7 @@ export default function App() {
                     <Choice
                       title="Due"
                       active={
-                        form.balanceType !==
-                        "advance"
+                        form.balanceType !== "advance"
                       }
                       onPress={() =>
                         setForm({
@@ -1329,8 +1362,7 @@ export default function App() {
                     <Choice
                       title="Advance"
                       active={
-                        form.balanceType ===
-                        "advance"
+                        form.balanceType === "advance"
                       }
                       onPress={() =>
                         setForm({
@@ -1373,26 +1405,23 @@ export default function App() {
                   </Text>
 
                   <View style={styles.choiceRow}>
-                    {[
-                      "Cash",
-                      "UPI",
-                      "Bank",
-                      "Cheque",
-                    ].map((x) => (
-                      <Choice
-                        key={x}
-                        title={x}
-                        active={
-                          form.paymentMode === x
-                        }
-                        onPress={() =>
-                          setForm({
-                            ...form,
-                            paymentMode: x,
-                          })
-                        }
-                      />
-                    ))}
+                    {["Cash", "UPI", "Bank", "Cheque"].map(
+                      (x) => (
+                        <Choice
+                          key={x}
+                          title={x}
+                          active={
+                            form.paymentMode === x
+                          }
+                          onPress={() =>
+                            setForm({
+                              ...form,
+                              paymentMode: x,
+                            })
+                          }
+                        />
+                      )
+                    )}
                   </View>
 
                   <Field
@@ -1459,26 +1488,23 @@ export default function App() {
                   </Text>
 
                   <View style={styles.choiceRow}>
-                    {[
-                      "Credit",
-                      "Cash",
-                      "UPI",
-                      "Bank",
-                    ].map((x) => (
-                      <Choice
-                        key={x}
-                        title={x}
-                        active={
-                          form.paymentMode === x
-                        }
-                        onPress={() =>
-                          setForm({
-                            ...form,
-                            paymentMode: x,
-                          })
-                        }
-                      />
-                    ))}
+                    {["Credit", "Cash", "UPI", "Bank"].map(
+                      (x) => (
+                        <Choice
+                          key={x}
+                          title={x}
+                          active={
+                            form.paymentMode === x
+                          }
+                          onPress={() =>
+                            setForm({
+                              ...form,
+                              paymentMode: x,
+                            })
+                          }
+                        />
+                      )
+                    )}
                   </View>
 
                   <Field
@@ -1676,10 +1702,11 @@ export default function App() {
   if (!ready) {
     return (
       <SafeAreaView style={styles.loading}>
+        <ActivityIndicator size="large" />
         <Text style={styles.loadingTitle}>
           Vyapar Khata
         </Text>
-        <Text>Loading...</Text>
+        <Text>Loading your business data...</Text>
       </SafeAreaView>
     );
   }
@@ -1687,12 +1714,10 @@ export default function App() {
   if (locked) {
     return (
       <SafeAreaView style={styles.lockScreen}>
-        <Text style={styles.lockIcon}>
-          🔐
-        </Text>
+        <Text style={styles.lockIcon}>🔐</Text>
 
         <Text style={styles.lockTitle}>
-          Vyapar Khata Locked
+          Vyapar Khata
         </Text>
 
         <Text style={styles.lockText}>
@@ -1735,24 +1760,16 @@ export default function App() {
             setSelected(null);
           }}
         >
-          <Text style={styles.bottomIcon}>
-            🏠
-          </Text>
-          <Text style={styles.bottomText}>
-            Home
-          </Text>
+          <Text style={styles.bottomIcon}>🏠</Text>
+          <Text style={styles.bottomText}>Home</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.bottomItem}
           onPress={setPinForApp}
         >
-          <Text style={styles.bottomIcon}>
-            🔐
-          </Text>
-          <Text style={styles.bottomText}>
-            PIN
-          </Text>
+          <Text style={styles.bottomIcon}>🔐</Text>
+          <Text style={styles.bottomText}>PIN</Text>
         </TouchableOpacity>
 
         {savedPin ? (
@@ -1760,9 +1777,7 @@ export default function App() {
             style={styles.bottomItem}
             onPress={removePin}
           >
-            <Text style={styles.bottomIcon}>
-              🔓
-            </Text>
+            <Text style={styles.bottomIcon}>🔓</Text>
             <Text style={styles.bottomText}>
               Remove PIN
             </Text>
@@ -1772,6 +1787,42 @@ export default function App() {
 
       {renderModal()}
     </SafeAreaView>
+  );
+}
+
+function Summary({ title, value, type }) {
+  return (
+    <View style={styles.summaryCard}>
+      <Text style={styles.summaryLabel}>{title}</Text>
+      <Text
+        style={[
+          styles.summaryValue,
+          type === "red" && styles.red,
+          type === "orange" && styles.orange,
+          type === "green" && styles.green,
+          type === "blue" && styles.blue,
+        ]}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function StatRow({ title, value, positive }) {
+  return (
+    <View style={styles.statRow}>
+      <Text>{title}</Text>
+      <Text
+        style={
+          positive
+            ? styles.greenText
+            : styles.redText
+        }
+      >
+        {value}
+      </Text>
+    </View>
   );
 }
 
@@ -1785,9 +1836,7 @@ function Field({
 }) {
   return (
     <View style={styles.field}>
-      <Text style={styles.fieldLabel}>
-        {label}
-      </Text>
+      <Text style={styles.fieldLabel}>{label}</Text>
 
       <TextInput
         style={styles.input}
@@ -1806,11 +1855,7 @@ function Field({
   );
 }
 
-function Choice({
-  title,
-  active,
-  onPress,
-}) {
+function Choice({ title, active, onPress }) {
   return (
     <TouchableOpacity
       style={[
@@ -1831,10 +1876,7 @@ function Choice({
   );
 }
 
-function SaveButton({
-  title,
-  onPress,
-}) {
+function SaveButton({ title, onPress }) {
   return (
     <TouchableOpacity
       style={styles.saveButton}
@@ -1850,56 +1892,55 @@ function SaveButton({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f7fb",
+    backgroundColor: "#f4f7fb",
   },
 
   content: {
     padding: 16,
-    paddingBottom: 110,
+    paddingBottom: 115,
   },
 
   loading: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#f5f7fb",
+    backgroundColor: "#f4f7fb",
   },
 
   loadingTitle: {
-    fontSize: 26,
-    fontWeight: "800",
-    marginBottom: 8,
+    fontSize: 25,
+    fontWeight: "900",
+    marginVertical: 10,
   },
 
   header: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 18,
   },
 
   brand: {
-    fontSize: 26,
-    fontWeight: "800",
+    fontSize: 27,
+    fontWeight: "900",
   },
 
   subBrand: {
-    color: "#777",
-    marginTop: 2,
+    color: "#718096",
+    marginTop: 3,
   },
 
   settingsButton: {
     width: 46,
     height: 46,
-    borderRadius: 23,
+    borderRadius: 14,
     backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
-    elevation: 2,
+    elevation: 3,
   },
 
   settingsText: {
-    fontSize: 23,
+    fontSize: 22,
   },
 
   summaryGrid: {
@@ -1911,31 +1952,42 @@ const styles = StyleSheet.create({
   summaryCard: {
     width: "48%",
     backgroundColor: "#fff",
-    padding: 15,
-    borderRadius: 14,
+    borderRadius: 17,
+    padding: 16,
     marginBottom: 12,
-    elevation: 1,
+    elevation: 2,
   },
 
   summaryLabel: {
-    color: "#777",
-    fontSize: 13,
-    marginBottom: 6,
+    color: "#718096",
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 7,
   },
 
   summaryValue: {
     fontSize: 18,
-    fontWeight: "800",
+    fontWeight: "900",
   },
 
-  receivable: {
-    fontSize: 18,
-    fontWeight: "800",
+  red: {
+    color: "#d32f2f",
   },
 
-  payable: {
-    fontSize: 18,
-    fontWeight: "800",
+  orange: {
+    color: "#e67e22",
+  },
+
+  green: {
+    color: "#168653",
+  },
+
+  blue: {
+    color: "#2463eb",
+  },
+
+  gray: {
+    color: "#777",
   },
 
   actionRow: {
@@ -1946,61 +1998,59 @@ const styles = StyleSheet.create({
 
   primaryButton: {
     flex: 1,
-    backgroundColor: "#1d7a46",
-    paddingVertical: 14,
-    borderRadius: 12,
+    backgroundColor: "#167a46",
+    paddingVertical: 15,
+    borderRadius: 14,
     alignItems: "center",
   },
 
   primaryButtonText: {
     color: "#fff",
-    fontWeight: "800",
+    fontWeight: "900",
+    fontSize: 15,
   },
 
   secondaryButton: {
     flex: 1,
     backgroundColor: "#fff",
-    paddingVertical: 14,
-    borderRadius: 12,
+    paddingVertical: 15,
+    borderRadius: 14,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#e1e5ea",
   },
 
   secondaryButtonText: {
-    fontWeight: "800",
+    fontWeight: "900",
+    fontSize: 15,
   },
 
   expenseButton: {
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#ddd",
-    paddingVertical: 13,
-    borderRadius: 12,
+    borderColor: "#e1e5ea",
+    paddingVertical: 14,
+    borderRadius: 14,
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: 22,
   },
 
   expenseButtonText: {
     fontWeight: "800",
   },
 
-  sectionHeader: {
-    marginBottom: 10,
-  },
-
   sectionTitle: {
     fontSize: 20,
-    fontWeight: "800",
-    marginBottom: 10,
+    fontWeight: "900",
+    marginBottom: 11,
   },
 
   tabs: {
     flexDirection: "row",
-    backgroundColor: "#e9edf3",
-    borderRadius: 12,
+    backgroundColor: "#e8edf3",
+    borderRadius: 13,
     padding: 3,
-    marginBottom: 10,
+    marginBottom: 11,
   },
 
   tab: {
@@ -2012,36 +2062,48 @@ const styles = StyleSheet.create({
 
   activeTab: {
     backgroundColor: "#fff",
+    elevation: 1,
   },
 
   tabText: {
-    fontWeight: "600",
-    fontSize: 12,
-  },
-
-  activeTabText: {
     fontWeight: "800",
+    fontSize: 12,
   },
 
   search: {
     backgroundColor: "#fff",
-    borderRadius: 12,
+    borderRadius: 13,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 13,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#e2e5e9",
+    borderColor: "#e1e5ea",
   },
 
   partyCard: {
     backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 15,
+    borderRadius: 15,
+    padding: 13,
     marginBottom: 9,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     elevation: 1,
+  },
+
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#e8f4ed",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+
+  avatarText: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#167a46",
   },
 
   partyInfo: {
@@ -2050,88 +2112,81 @@ const styles = StyleSheet.create({
 
   partyName: {
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: "900",
   },
 
   partyPhone: {
-    color: "#777",
+    color: "#718096",
     marginTop: 3,
   },
 
   partyBalance: {
     fontSize: 16,
-    fontWeight: "800",
-  },
-
-  red: {
-    color: "#c62828",
-  },
-
-  green: {
-    color: "#198754",
-  },
-
-  gray: {
-    color: "#777",
+    fontWeight: "900",
   },
 
   empty: {
     alignItems: "center",
-    paddingVertical: 30,
+    paddingVertical: 35,
+  },
+
+  emptyIcon: {
+    fontSize: 35,
+    marginBottom: 8,
   },
 
   emptyTitle: {
     fontSize: 17,
-    fontWeight: "800",
+    fontWeight: "900",
   },
 
   emptyText: {
-    color: "#777",
+    color: "#718096",
     marginTop: 5,
     textAlign: "center",
   },
 
   statsCard: {
     backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 15,
+    borderRadius: 16,
+    padding: 16,
     marginTop: 12,
-    marginBottom: 20,
+    marginBottom: 22,
   },
 
   statsTitle: {
-    fontWeight: "800",
+    fontWeight: "900",
     fontSize: 17,
-    marginBottom: 12,
+    marginBottom: 10,
   },
 
   statRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingVertical: 7,
+    paddingVertical: 8,
   },
 
   greenText: {
-    color: "#198754",
-    fontWeight: "800",
+    color: "#168653",
+    fontWeight: "900",
   },
 
   redText: {
-    color: "#c62828",
-    fontWeight: "800",
+    color: "#d32f2f",
+    fontWeight: "900",
   },
 
   transactionCard: {
     backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 13,
+    borderRadius: 13,
+    padding: 14,
     marginBottom: 8,
     flexDirection: "row",
     alignItems: "center",
   },
 
   transactionName: {
-    fontWeight: "800",
+    fontWeight: "900",
     fontSize: 15,
   },
 
@@ -2147,7 +2202,7 @@ const styles = StyleSheet.create({
   },
 
   transactionAmount: {
-    fontWeight: "800",
+    fontWeight: "900",
     fontSize: 16,
     marginLeft: 10,
   },
@@ -2158,24 +2213,40 @@ const styles = StyleSheet.create({
 
   backText: {
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: "900",
   },
 
   profileCard: {
     backgroundColor: "#fff",
     padding: 20,
-    borderRadius: 16,
+    borderRadius: 18,
     alignItems: "center",
     marginBottom: 15,
   },
 
+  bigAvatar: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: "#e8f4ed",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
+  },
+
+  bigAvatarText: {
+    color: "#167a46",
+    fontSize: 28,
+    fontWeight: "900",
+  },
+
   profileName: {
     fontSize: 24,
-    fontWeight: "800",
+    fontWeight: "900",
   },
 
   profilePhone: {
-    color: "#777",
+    color: "#718096",
     marginTop: 5,
   },
 
@@ -2186,7 +2257,7 @@ const styles = StyleSheet.create({
   },
 
   balanceCaption: {
-    color: "#777",
+    color: "#718096",
     marginTop: 18,
   },
 
@@ -2204,40 +2275,40 @@ const styles = StyleSheet.create({
 
   receiveButton: {
     width: "48%",
-    backgroundColor: "#198754",
+    backgroundColor: "#168653",
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: 13,
     alignItems: "center",
     marginBottom: 10,
   },
 
   giveButton: {
     width: "48%",
-    backgroundColor: "#c62828",
+    backgroundColor: "#d32f2f",
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: 13,
     alignItems: "center",
     marginBottom: 10,
   },
 
   actionButtonText: {
     color: "#fff",
-    fontWeight: "800",
+    fontWeight: "900",
   },
 
   normalAction: {
     width: "48%",
     backgroundColor: "#fff",
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: 13,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#e1e5ea",
     marginBottom: 10,
   },
 
   normalActionText: {
-    fontWeight: "800",
+    fontWeight: "900",
   },
 
   contactRow: {
@@ -2251,29 +2322,29 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#fff",
     paddingVertical: 13,
-    borderRadius: 12,
+    borderRadius: 13,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#e1e5ea",
   },
 
   contactText: {
-    fontWeight: "800",
+    fontWeight: "900",
   },
 
   deleteButton: {
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e0b0b0",
+    borderColor: "#efb7b7",
     paddingVertical: 13,
-    borderRadius: 12,
+    borderRadius: 13,
     alignItems: "center",
     marginBottom: 20,
   },
 
   deleteText: {
-    color: "#c62828",
-    fontWeight: "800",
+    color: "#d32f2f",
+    fontWeight: "900",
   },
 
   bottomBar: {
@@ -2283,7 +2354,7 @@ const styles = StyleSheet.create({
     right: 0,
     backgroundColor: "#fff",
     borderTopWidth: 1,
-    borderTopColor: "#eee",
+    borderTopColor: "#e9edf1",
     flexDirection: "row",
     paddingVertical: 9,
     paddingBottom: Platform.OS === "ios" ? 22 : 9,
@@ -2301,20 +2372,20 @@ const styles = StyleSheet.create({
   bottomText: {
     fontSize: 10,
     marginTop: 2,
-    fontWeight: "600",
+    fontWeight: "700",
   },
 
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: "rgba(0,0,0,0.48)",
     justifyContent: "flex-end",
   },
 
   modalBox: {
-    backgroundColor: "#f7f8fa",
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    maxHeight: "92%",
+    backgroundColor: "#f6f8fa",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: "94%",
     padding: 18,
   },
 
@@ -2322,7 +2393,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 15,
+    marginBottom: 16,
   },
 
   modalTitle: {
@@ -2335,13 +2406,39 @@ const styles = StyleSheet.create({
     color: "#555",
   },
 
+  contactPickerButton: {
+    backgroundColor: "#167a46",
+    borderRadius: 15,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 17,
+  },
+
+  contactPickerIcon: {
+    fontSize: 27,
+    marginRight: 12,
+  },
+
+  contactPickerTitle: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  contactPickerSub: {
+    color: "#d9f2e4",
+    marginTop: 3,
+    fontSize: 11,
+  },
+
   field: {
     marginBottom: 12,
   },
 
   fieldLabel: {
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: "800",
     marginBottom: 6,
     color: "#444",
   },
@@ -2349,8 +2446,8 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 11,
+    borderColor: "#dfe3e8",
+    borderRadius: 12,
     paddingHorizontal: 13,
     paddingVertical: 12,
     fontSize: 15,
@@ -2387,9 +2484,9 @@ const styles = StyleSheet.create({
   },
 
   saveButton: {
-    backgroundColor: "#1d7a46",
-    paddingVertical: 14,
-    borderRadius: 12,
+    backgroundColor: "#167a46",
+    paddingVertical: 15,
+    borderRadius: 13,
     alignItems: "center",
     marginTop: 5,
   },
@@ -2402,7 +2499,7 @@ const styles = StyleSheet.create({
 
   lockScreen: {
     flex: 1,
-    backgroundColor: "#f5f7fb",
+    backgroundColor: "#f4f7fb",
     alignItems: "center",
     justifyContent: "center",
     padding: 25,
@@ -2414,7 +2511,7 @@ const styles = StyleSheet.create({
   },
 
   lockTitle: {
-    fontSize: 24,
+    fontSize: 25,
     fontWeight: "900",
   },
 
@@ -2438,9 +2535,9 @@ const styles = StyleSheet.create({
 
   unlockButton: {
     width: "80%",
-    backgroundColor: "#1d7a46",
+    backgroundColor: "#167a46",
     paddingVertical: 15,
-    borderRadius: 12,
+    borderRadius: 13,
     alignItems: "center",
     marginTop: 15,
   },

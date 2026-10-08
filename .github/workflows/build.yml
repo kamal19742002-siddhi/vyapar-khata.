@@ -16,7 +16,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -62,6 +61,7 @@ jobs:
           cat > babel.config.js <<'EOF'
           module.exports = function(api) {
             api.cache(true);
+
             return {
               presets: ['babel-preset-expo']
             };
@@ -114,25 +114,29 @@ jobs:
               "orientation": "portrait",
               "icon": "./assets/icon.png",
               "userInterfaceStyle": "light",
+
               "splash": {
                 "image": "./assets/splash.png",
                 "resizeMode": "contain",
                 "backgroundColor": "#ffffff"
               },
+
               "android": {
                 "package": "com.vyapar.khatabook.free",
                 "versionCode": ${VERSION_CODE},
                 "compileSdkVersion": 36,
                 "targetSdkVersion": 36,
+
                 "permissions": [
-                  "android.permission.READ_CONTACTS",
-                  "android.permission.WRITE_CONTACTS"
+                  "android.permission.READ_CONTACTS"
                 ],
+
                 "adaptiveIcon": {
                   "foregroundImage": "./assets/adaptive-icon.png",
                   "backgroundColor": "#ffffff"
                 }
               },
+
               "plugins": [
                 "expo-contacts"
               ]
@@ -155,54 +159,67 @@ jobs:
           from pathlib import Path
 
           p = Path("build.gradle")
-          s = p.read_text()
 
-          s = s.replace(
-              'compileSdkVersion = Integer.valueOf(findProperty(\'android.compileSdkVersion\') ?: 34)',
-              'compileSdkVersion = 36'
-          )
+          if p.exists():
+              s = p.read_text()
 
-          s = s.replace(
-              'targetSdkVersion = Integer.valueOf(findProperty(\'android.targetSdkVersion\') ?: 34)',
-              'targetSdkVersion = 36'
-          )
+              s = s.replace(
+                  "compileSdkVersion = Integer.valueOf(findProperty('android.compileSdkVersion') ?: 34)",
+                  "compileSdkVersion = 36"
+              )
 
-          p.write_text(s)
+              s = s.replace(
+                  "targetSdkVersion = Integer.valueOf(findProperty('android.targetSdkVersion') ?: 34)",
+                  "targetSdkVersion = 36"
+              )
+
+              p.write_text(s)
           PY
 
       - name: Check signing secrets
         shell: bash
         run: |
-          test -n "${{ secrets.KEYSTORE_BASE64 }}" || {
-            echo "KEYSTORE_BASE64 missing"
+          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "ERROR: KEYSTORE_BASE64 missing"
             exit 1
-          }
+          fi
 
-          test -n "${{ secrets.KEYSTORE_PASSWORD }}" || {
-            echo "KEYSTORE_PASSWORD missing"
+          if [ -z "${{ secrets.KEYSTORE_PASSWORD }}" ]; then
+            echo "ERROR: KEYSTORE_PASSWORD missing"
             exit 1
-          }
+          fi
 
-          test -n "${{ secrets.KEY_ALIAS }}" || {
-            echo "KEY_ALIAS missing"
+          if [ -z "${{ secrets.KEY_ALIAS }}" ]; then
+            echo "ERROR: KEY_ALIAS missing"
             exit 1
-          }
+          fi
 
-          test -n "${{ secrets.KEY_PASSWORD }}" || {
-            echo "KEY_PASSWORD missing"
+          if [ -z "${{ secrets.KEY_PASSWORD }}" ]; then
+            echo "ERROR: KEY_PASSWORD missing"
             exit 1
-          }
+          fi
+
+          echo "Signing secrets found."
 
       - name: Restore signing keystore
         shell: bash
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/vyapar-upload.jks
 
+          if [ ! -f android/app/vyapar-upload.jks ]; then
+            echo "ERROR: Keystore file not created"
+            exit 1
+          fi
+
           ls -lh android/app/vyapar-upload.jks
 
       - name: Configure release signing
         shell: bash
         working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -210,7 +227,7 @@ jobs:
           p = Path("app/build.gradle")
           s = p.read_text()
 
-          signing = r'''
+          signing_block = """
               signingConfigs {
                   release {
                       storeFile file("vyapar-upload.jks")
@@ -219,26 +236,35 @@ jobs:
                       keyPassword System.getenv("KEY_PASSWORD")
                   }
               }
-          '''
+          """
 
           if "signingConfigs {" not in s:
-              marker = "android {"
-              s = s.replace(marker, marker + "\n" + signing, 1)
+              s = s.replace(
+                  "android {",
+                  "android {\n" + signing_block,
+                  1
+              )
+
+          if "signingConfig signingConfigs.release" not in s:
+              s = s.replace(
+                  "buildTypes {",
+                  """buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              """,
+                  1
+              )
 
           s = s.replace(
               "signingConfig signingConfigs.debug",
               "signingConfig signingConfigs.release"
           )
 
-          if "signingConfig signingConfigs.release" not in s:
-              s = s.replace(
-                  "buildTypes {",
-                  'buildTypes {\n        release {\n            signingConfig signingConfigs.release\n        }',
-                  1
-              )
-
           p.write_text(s)
           PY
+
+          echo "Release signing configured."
 
       - name: Build Release AAB
         working-directory: android
@@ -249,20 +275,26 @@ jobs:
         shell: bash
         run: |
           chmod +x gradlew
+
           ./gradlew clean
+
           ./gradlew bundleRelease --stacktrace
 
       - name: Verify AAB
         shell: bash
         run: |
+          echo "Checking generated AAB..."
+
           ls -lh android/app/build/outputs/bundle/release/
 
           if [ ! -f android/app/build/outputs/bundle/release/app-release.aab ]; then
-            echo "AAB NOT FOUND"
+            echo "ERROR: AAB NOT FOUND"
             exit 1
           fi
 
+          echo "================================"
           echo "AAB BUILD SUCCESSFUL"
+          echo "================================"
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4

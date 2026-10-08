@@ -378,7 +378,8 @@ jobs:
           lines.append(
               "android.suppressUnsupportedCompileSdk=36"
           )
-
+          echo "===== FINAL SDK VALUES ====="
+          grep -RniE "compileSdk|targetSdk" android/app android/gradle.properties || true
           if not any(
               x.startswith(
                   "org.gradle.jvmargs="

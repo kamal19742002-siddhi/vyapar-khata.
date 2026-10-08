@@ -134,7 +134,7 @@ jobs:
 
           app.expo.android.package = "com.vyapar.khatabook.free";
 
-          app.expo.android.versionCode = 2200 + run;
+          app.expo.android.versionCode = 3000 + run;
 
           app.expo.android.minSdkVersion = 24;
 

@@ -7,33 +7,42 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      PACKAGE_NAME: com.vyapar.khatabook.free
+      VERSION_CODE: ${{ 5000 + github.run_number }}
+
     steps:
 
+      # 1. Checkout
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 2. Node
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
+      # 3. Java 17
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
+      # 4. Create package.json
       - name: Create package.json
         shell: bash
         run: |
           cat > package.json <<'EOF'
           {
             "name": "vyapar-khata",
-            "version": "1.0.0",
+            "version": "2.0.0",
             "private": true,
             "main": "index.js",
             "scripts": {
-              "start": "expo start"
+              "start": "expo start",
+              "android": "expo run:android"
             },
             "dependencies": {
               "@react-native-async-storage/async-storage": "1.23.1",
@@ -44,29 +53,31 @@ jobs:
             },
             "devDependencies": {
               "@babel/core": "^7.24.0",
-              "babel-preset-expo": "^11.0.0"
+              "babel-preset-expo": "~11.0.0"
             }
           }
           EOF
 
+      # 5. Install dependencies
       - name: Install dependencies
         shell: bash
         run: |
           npm install --legacy-peer-deps
 
+      # 6. Babel
       - name: Create Babel config
         shell: bash
         run: |
           cat > babel.config.js <<'EOF'
           module.exports = function(api) {
             api.cache(true);
-
             return {
               presets: ['babel-preset-expo']
             };
           };
           EOF
 
+      # 7. React Native entry
       - name: Create index.js
         shell: bash
         run: |
@@ -77,33 +88,10 @@ jobs:
           registerRootComponent(App);
           EOF
 
-      - name: Create assets
+      # 8. Expo configuration
+      - name: Create app.json
         shell: bash
         run: |
-          mkdir -p assets
-
-          python3 - <<'PY'
-          import base64
-
-          png = base64.b64decode(
-              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-          )
-
-          for name in [
-              "icon.png",
-              "adaptive-icon.png",
-              "splash.png",
-              "favicon.png"
-          ]:
-              with open("assets/" + name, "wb") as f:
-                  f.write(png)
-          PY
-
-      - name: Create Expo app.json
-        shell: bash
-        run: |
-          VERSION_CODE=$((3000 + GITHUB_RUN_NUMBER))
-
           cat > app.json <<EOF
           {
             "expo": {
@@ -111,155 +99,225 @@ jobs:
               "slug": "vyapar-khata",
               "version": "2.0.0",
               "orientation": "portrait",
-              "icon": "./assets/icon.png",
-              "userInterfaceStyle": "light",
-
-              "splash": {
-                "image": "./assets/splash.png",
-                "resizeMode": "contain",
-                "backgroundColor": "#ffffff"
-              },
-
               "android": {
-                "package": "com.vyapar.khatabook.free",
+                "package": "${PACKAGE_NAME}",
                 "versionCode": ${VERSION_CODE},
-                "compileSdkVersion": 36,
-                "targetSdkVersion": 36,
-
                 "permissions": [
-                  "android.permission.READ_CONTACTS"
-                ],
-
-                "adaptiveIcon": {
-                  "foregroundImage": "./assets/adaptive-icon.png",
-                  "backgroundColor": "#ffffff"
-                }
+                  "READ_CONTACTS"
+                ]
               },
-
               "plugins": [
-                "expo-contacts"
+                [
+                  "expo-contacts",
+                  {
+                    "contactsPermission": "Allow Vyapar Khata to access your contacts so you can add customers and suppliers."
+                  }
+                ]
               ]
             }
           }
           EOF
 
-          echo "Version Code: ${VERSION_CODE}"
-
-      - name: Prebuild Android
+      # 9. Expo prebuild
+      - name: Expo prebuild
         shell: bash
         run: |
-          npx expo prebuild --platform android --clean --no-install
+          npx expo prebuild \
+            --platform android \
+            --non-interactive \
+            --clean
 
-      - name: Verify Android project
+      # 10. Force Android API 36
+      - name: Configure Android SDK 36
         shell: bash
         run: |
-          if [ ! -d "android" ]; then
-            echo "ERROR: Android project was not created."
-            exit 1
-          fi
+          cat >> android/gradle.properties <<'EOF'
 
-          if [ ! -f "android/gradlew" ]; then
-            echo "ERROR: Gradle wrapper was not created."
-            exit 1
-          fi
+          android.compileSdkVersion=36
+          android.targetSdkVersion=36
+          android.buildToolsVersion=36.0.0
+          EOF
 
-          echo "Android project created successfully."
-
-      - name: Check Android SDK
-        shell: bash
-        run: |
-          echo "Android project:"
-          ls -la android
-
-          echo "Gradle wrapper:"
-          ls -lh android/gradlew
-
-      - name: Check signing secrets
-        shell: bash
-        run: |
-          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "ERROR: KEYSTORE_BASE64 is missing"
-            exit 1
-          fi
-
-          if [ -z "${{ secrets.KEYSTORE_PASSWORD }}" ]; then
-            echo "ERROR: KEYSTORE_PASSWORD is missing"
-            exit 1
-          fi
-
-          if [ -z "${{ secrets.KEY_ALIAS }}" ]; then
-            echo "ERROR: KEY_ALIAS is missing"
-            exit 1
-          fi
-
-          if [ -z "${{ secrets.KEY_PASSWORD }}" ]; then
-            echo "ERROR: KEY_PASSWORD is missing"
-            exit 1
-          fi
-
-          echo "All signing secrets are available."
-
+      # 11. Restore existing upload keystore
       - name: Restore signing keystore
         shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/vyapar-upload.jks
+          mkdir -p android/app
 
-          if [ ! -s "android/app/vyapar-upload.jks" ]; then
-            echo "ERROR: Keystore file is empty or was not created."
-            exit 1
-          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+
+          cat > android/keystore.properties <<EOF
+          storeFile=upload-keystore.jks
+          storePassword=${KEYSTORE_PASSWORD}
+          keyAlias=${KEY_ALIAS}
+          keyPassword=${KEY_PASSWORD}
+          EOF
 
           echo "Keystore restored successfully."
 
-      - name: Verify keystore
+      # 12. Configure release signing
+      - name: Configure release signing
         shell: bash
         env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
-          keytool -list \
-            -keystore android/app/vyapar-upload.jks \
-            -storepass "$KEYSTORE_PASSWORD" \
-            -alias "$KEY_ALIAS"
+          python3 <<'PY'
+          from pathlib import Path
+          import re
 
+          path = Path("android/app/build.gradle")
+          text = path.read_text()
+
+          # Add keystore properties before android block
+          if "keystorePropertiesFile" not in text:
+              block = r'''
+          def keystorePropertiesFile = rootProject.file("keystore.properties")
+          def keystoreProperties = new Properties()
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+
+          '''
+              text = text.replace("android {", block + "android {", 1)
+
+          def find_block_end(s, start):
+              depth = 0
+              opened = False
+              for i in range(start, len(s)):
+                  if s[i] == '{':
+                      depth += 1
+                      opened = True
+                  elif s[i] == '}':
+                      depth -= 1
+                      if opened and depth == 0:
+                          return i + 1
+              return -1
+
+          # Find android { block
+          android_pos = text.find("android {")
+          android_end = find_block_end(text, android_pos)
+
+          android_block = text[android_pos:android_end]
+
+          # Add signingConfigs release
+          if "signingConfigs {" not in android_block:
+              signing = r'''
+              signingConfigs {
+                  release {
+                      storeFile file(keystoreProperties['storeFile'])
+                      storePassword keystoreProperties['storePassword']
+                      keyAlias keystoreProperties['keyAlias']
+                      keyPassword keystoreProperties['keyPassword']
+                  }
+              }
+
+          '''
+              text = text[:android_pos + len("android {")] + signing + text[android_pos + len("android {"):]
+
+          else:
+              # Recalculate
+              android_pos = text.find("android {")
+              android_end = find_block_end(text, android_pos)
+              android_block = text[android_pos:android_end]
+
+              sc_pos = text.find("signingConfigs {", android_pos, android_end)
+              sc_end = find_block_end(text, sc_pos)
+
+              signing_block = text[sc_pos:sc_end]
+
+              if re.search(r'\brelease\s*\{', signing_block) is None:
+                  release = r'''
+                  release {
+                      storeFile file(keystoreProperties['storeFile'])
+                      storePassword keystoreProperties['storePassword']
+                      keyAlias keystoreProperties['keyAlias']
+                      keyPassword keystoreProperties['keyPassword']
+                  }
+              '''
+                  text = text[:sc_end-1] + release + "\n" + text[sc_end-1:]
+
+          # Find buildTypes block
+          android_pos = text.find("android {")
+          android_end = find_block_end(text, android_pos)
+
+          bt_pos = text.find("buildTypes {", android_pos, android_end)
+
+          if bt_pos == -1:
+              raise SystemExit("buildTypes block not found")
+
+          bt_end = find_block_end(text, bt_pos)
+          bt_block = text[bt_pos:bt_end]
+
+          # Find release block inside buildTypes
+          rel_match = re.search(r'\brelease\s*\{', bt_block)
+
+          if rel_match:
+              rel_start = bt_pos + rel_match.start()
+              rel_end = find_block_end(text, rel_start)
+
+              release_block = text[rel_start:rel_end]
+
+              if "signingConfig signingConfigs.release" not in release_block:
+                  insert_at = rel_start + len(re.match(r'\brelease\s*\{', release_block).group())
+                  text = text[:insert_at] + "\n            signingConfig signingConfigs.release" + text[insert_at:]
+
+          else:
+              release_block = r'''
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              '''
+              text = text[:bt_end-1] + release_block + "\n" + text[bt_end-1:]
+
+          path.write_text(text)
+          print("Release signing configured successfully.")
+          PY
+
+      # 13. Verify version
+      - name: Show build information
+        shell: bash
+        run: |
+          echo "Package: ${PACKAGE_NAME}"
+          echo "Version code: ${VERSION_CODE}"
+          echo "Java:"
+          java -version
+          echo "Node:"
+          node --version
+          echo "Expo:"
+          npx expo --version
+
+      # 14. Build AAB
       - name: Build Release AAB
-        working-directory: android
+        shell: bash
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        shell: bash
         run: |
+          cd android
           chmod +x gradlew
+          ./gradlew clean bundleRelease --no-daemon
 
-          ./gradlew clean
-
-          ./gradlew bundleRelease \
-            --stacktrace \
-            -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/android/app/vyapar-upload.jks" \
-            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
-            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
-            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
-
-      - name: Verify AAB
-        shell: bash
-        run: |
-          echo "Checking AAB..."
-
-          if [ ! -f "android/app/build/outputs/bundle/release/app-release.aab" ]; then
-            echo "ERROR: app-release.aab was not generated."
-            exit 1
-          fi
-
-          ls -lh android/app/build/outputs/bundle/release/app-release.aab
-
-          echo "=========================================="
-          echo "       AAB BUILD SUCCESSFUL"
-          echo "=========================================="
-
+      # 15. Upload AAB
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
           name: vyapar-khata-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
+
+      # 16. Show final file
+      - name: Build completed
+        shell: bash
+        run: |
+          ls -lh android/app/build/outputs/bundle/release/app-release.aab
+          echo "======================================"
+          echo "VYAPAR KHATA AAB BUILD SUCCESSFUL"
+          echo "Version Code: ${VERSION_CODE}"
+          echo "Package: ${PACKAGE_NAME}"
+          echo "======================================"

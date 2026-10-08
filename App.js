@@ -1,27 +1,22 @@
-
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Linking,
   Modal,
-  Pressable,
   SafeAreaView,
   ScrollView,
-  Share,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
-
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Contacts from "expo-contacts";
 
-const DATA_KEY = "@vyapar_khata_advanced_v1";
-const PIN_KEY = "@vyapar_khata_pin_advanced_v1";
+const DATA_KEY = "@vyapar_khata_market_v5";
 
-const EMPTY = {
+const emptyData = {
   business: {
     name: "My Business",
     owner: "",
@@ -29,7 +24,6 @@ const EMPTY = {
     upi: "",
     gstin: "",
   },
-
   customers: [],
   suppliers: [],
   products: [],
@@ -38,1624 +32,1163 @@ const EMPTY = {
 };
 
 const money = (n) =>
-  "₹" + Number(n || 0).toLocaleString("en-IN", {
+  "₹" +
+  Number(n || 0).toLocaleString("en-IN", {
     maximumFractionDigits: 2,
   });
 
-const id = () =>
-  Date.now().toString() + Math.random().toString(36).slice(2, 8);
-
 const today = () => new Date().toISOString().slice(0, 10);
 
-function App() {
-  const [data, setData] = useState(EMPTY);
+export default function App() {
+  const [data, setData] = useState(emptyData);
   const [loaded, setLoaded] = useState(false);
-  const [screen, setScreen] = useState("home");
+  const [tab, setTab] = useState("Home");
+
   const [modal, setModal] = useState(null);
-  const [pin, setPin] = useState("");
-  const [savedPin, setSavedPin] = useState("");
+  const [selected, setSelected] = useState(null);
+
+  const [form, setForm] = useState({});
 
   useEffect(() => {
     loadData();
   }, []);
 
+  useEffect(() => {
+    if (loaded) saveData();
+  }, [data, loaded]);
+
   async function loadData() {
     try {
-      const d = await AsyncStorage.getItem(DATA_KEY);
-      const p = await AsyncStorage.getItem(PIN_KEY);
+      const raw = await AsyncStorage.getItem(DATA_KEY);
 
-      if (d) {
+      if (raw) {
+        const saved = JSON.parse(raw);
+
         setData({
-          ...EMPTY,
-          ...JSON.parse(d),
+          ...emptyData,
+          ...saved,
+          business: {
+            ...emptyData.business,
+            ...(saved.business || {}),
+          },
         });
       }
-
-      if (p) setSavedPin(p);
     } catch (e) {
-      Alert.alert("Error", "Data load nahi ho paya.");
+      Alert.alert("Error", "Data load nahi ho saka.");
     }
 
     setLoaded(true);
   }
 
-  async function saveData(next) {
-    setData(next);
-    await AsyncStorage.setItem(DATA_KEY, JSON.stringify(next));
+  async function saveData() {
+    await AsyncStorage.setItem(DATA_KEY, JSON.stringify(data));
+  }
+
+  function updateForm(key, value) {
+    setForm((p) => ({ ...p, [key]: value }));
+  }
+
+  function openAdd(type) {
+    setSelected(null);
+    setForm({});
+    setModal(type);
+  }
+
+  function closeModal() {
+    setModal(null);
+    setSelected(null);
+    setForm({});
+  }
+
+  function addCustomer() {
+    if (!form.name?.trim()) {
+      Alert.alert("Name required", "Customer ka naam likhiye.");
+      return;
+    }
+
+    const item = {
+      id: Date.now().toString(),
+      name: form.name.trim(),
+      phone: form.phone || "",
+      address: form.address || "",
+      balance: Number(form.balance || 0),
+    };
+
+    setData((p) => ({
+      ...p,
+      customers: [...p.customers, item],
+    }));
+
+    closeModal();
+  }
+
+  function addSupplier() {
+    if (!form.name?.trim()) {
+      Alert.alert("Name required", "Supplier ka naam likhiye.");
+      return;
+    }
+
+    const item = {
+      id: Date.now().toString(),
+      name: form.name.trim(),
+      phone: form.phone || "",
+      balance: Number(form.balance || 0),
+    };
+
+    setData((p) => ({
+      ...p,
+      suppliers: [...p.suppliers, item],
+    }));
+
+    closeModal();
+  }
+
+  function addProduct() {
+    if (!form.name?.trim()) {
+      Alert.alert("Product required", "Product name likhiye.");
+      return;
+    }
+
+    const item = {
+      id: Date.now().toString(),
+      name: form.name.trim(),
+      sku: form.sku || "",
+      buy: Number(form.buy || 0),
+      sell: Number(form.sell || 0),
+      stock: Number(form.stock || 0),
+      low: Number(form.low || 5),
+    };
+
+    setData((p) => ({
+      ...p,
+      products: [...p.products, item],
+    }));
+
+    closeModal();
+  }
+
+  function addTransaction() {
+    if (!form.amount || Number(form.amount) <= 0) {
+      Alert.alert("Amount required", "Valid amount enter kijiye.");
+      return;
+    }
+
+    const item = {
+      id: Date.now().toString(),
+      date: today(),
+      type: form.type || "sale",
+      party: form.party || "Walk-in Customer",
+      amount: Number(form.amount),
+      note: form.note || "",
+    };
+
+    setData((p) => ({
+      ...p,
+      transactions: [item, ...p.transactions],
+    }));
+
+    closeModal();
+  }
+
+  function addExpense() {
+    if (!form.amount || Number(form.amount) <= 0) {
+      Alert.alert("Amount required", "Expense amount enter kijiye.");
+      return;
+    }
+
+    const item = {
+      id: Date.now().toString(),
+      date: today(),
+      category: form.category || "Other",
+      amount: Number(form.amount),
+      note: form.note || "",
+    };
+
+    setData((p) => ({
+      ...p,
+      expenses: [item, ...p.expenses],
+    }));
+
+    closeModal();
+  }
+
+  function deleteItem(collection, id) {
+    Alert.alert("Delete", "Kya aap ise delete karna chahte hain?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => {
+          setData((p) => ({
+            ...p,
+            [collection]: p[collection].filter((x) => x.id !== id),
+          }));
+        },
+      },
+    ]);
+  }
+
+  function updateBusiness() {
+    setData((p) => ({
+      ...p,
+      business: {
+        ...p.business,
+        name: form.name || p.business.name,
+        owner: form.owner || "",
+        phone: form.phone || "",
+        upi: form.upi || "",
+        gstin: form.gstin || "",
+      },
+    }));
+
+    closeModal();
+  }
+
+  function sendWhatsApp(phone, message) {
+    if (!phone) {
+      Alert.alert("Phone missing", "Customer ka phone number add kijiye.");
+      return;
+    }
+
+    const clean = String(phone).replace(/\D/g, "");
+    const number = clean.length === 10 ? "91" + clean : clean;
+
+    Linking.openURL(
+      `https://wa.me/${number}?text=${encodeURIComponent(message)}`
+    ).catch(() => {
+      Alert.alert("WhatsApp", "WhatsApp open nahi ho saka.");
+    });
+  }
+
+  const stats = useMemo(() => {
+    let sales = 0;
+    let purchases = 0;
+    let received = 0;
+    let given = 0;
+
+    data.transactions.forEach((t) => {
+      if (t.type === "sale") sales += t.amount;
+      if (t.type === "purchase") purchases += t.amount;
+      if (t.type === "received") received += t.amount;
+      if (t.type === "given") given += t.amount;
+    });
+
+    const expenses = data.expenses.reduce(
+      (sum, e) => sum + Number(e.amount || 0),
+      0
+    );
+
+    const stockValue = data.products.reduce(
+      (sum, p) => sum + Number(p.stock || 0) * Number(p.buy || 0),
+      0
+    );
+
+    const receivable = data.customers.reduce(
+      (sum, c) => sum + Number(c.balance || 0),
+      0
+    );
+
+    const payable = data.suppliers.reduce(
+      (sum, s) => sum + Number(s.balance || 0),
+      0
+    );
+
+    const profit = sales - purchases - expenses;
+
+    return {
+      sales,
+      purchases,
+      received,
+      given,
+      expenses,
+      stockValue,
+      receivable,
+      payable,
+      profit,
+    };
+  }, [data]);
+
+  const lowStock = data.products.filter(
+    (p) => Number(p.stock) <= Number(p.low)
+  );
+
+  const healthScore = useMemo(() => {
+    let score = 50;
+
+    if (stats.profit > 0) score += 15;
+    if (stats.sales > stats.purchases) score += 10;
+    if (lowStock.length === 0) score += 10;
+    if (data.customers.length >= 5) score += 5;
+    if (stats.receivable < stats.sales * 0.5 || stats.sales === 0) score += 5;
+    if (data.products.length >= 5) score += 5;
+
+    return Math.max(0, Math.min(100, score));
+  }, [stats, lowStock, data]);
+
+  function advisorMessage() {
+    if (stats.sales === 0) {
+      return "Abhi sales record nahi hui. Daily sales entry maintain karke business trend dekhiye.";
+    }
+
+    if (lowStock.length > 0) {
+      return `${lowStock.length} product low stock par hain. Reorder karne se stock-out ka risk kam hoga.`;
+    }
+
+    if (stats.receivable > stats.sales * 0.5) {
+      return "Customer outstanding high hai. Pending payments ke liye WhatsApp reminder bhejiye.";
+    }
+
+    if (stats.profit > 0) {
+      return "Business positive profit dikha raha hai. High-margin products par focus kijiye.";
+    }
+
+    return "Expenses aur purchase cost ko monitor karke margin improve karne ki koshish kijiye.";
+  }
+
+  function Card({ title, value, subtitle, onPress }) {
+    return (
+      <TouchableOpacity
+        style={styles.card}
+        onPress={onPress}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.cardTitle}>{title}</Text>
+        <Text style={styles.cardValue}>{value}</Text>
+        {subtitle ? <Text style={styles.cardSub}>{subtitle}</Text> : null}
+      </TouchableOpacity>
+    );
+  }
+
+  function Button({ title, onPress, secondary }) {
+    return (
+      <TouchableOpacity
+        style={[styles.button, secondary && styles.secondaryButton]}
+        onPress={onPress}
+      >
+        <Text
+          style={[
+            styles.buttonText,
+            secondary && styles.secondaryButtonText,
+          ]}
+        >
+          {title}
+        </Text>
+      </TouchableOpacity>
+    );
+  }
+
+  function SectionTitle({ children }) {
+    return <Text style={styles.sectionTitle}>{children}</Text>;
+  }
+
+  function Input({ label, field, placeholder, keyboardType }) {
+    return (
+      <View style={styles.inputWrap}>
+        <Text style={styles.inputLabel}>{label}</Text>
+        <TextInput
+          style={styles.input}
+          value={form[field] || ""}
+          onChangeText={(v) => updateForm(field, v)}
+          placeholder={placeholder}
+          keyboardType={keyboardType}
+          placeholderTextColor="#999"
+        />
+      </View>
+    );
+  }
+
+  function Home() {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.hero}>
+          <Text style={styles.heroSmall}>BUSINESS DASHBOARD</Text>
+          <Text style={styles.heroTitle}>{data.business.name}</Text>
+          <Text style={styles.heroSub}>
+            {data.business.owner || "Your business at a glance"}
+          </Text>
+        </View>
+
+        <View style={styles.grid}>
+          <Card title="Today's Sales" value={money(stats.sales)} />
+          <Card title="Profit" value={money(stats.profit)} />
+          <Card title="Receivable" value={money(stats.receivable)} />
+          <Card title="Payable" value={money(stats.payable)} />
+        </View>
+
+        <SectionTitle>Quick Actions</SectionTitle>
+
+        <View style={styles.actionGrid}>
+          <Button title="+ Sale" onPress={() => openAdd("transaction")} />
+          <Button title="+ Purchase" onPress={() => {
+            setForm({ type: "purchase" });
+            setModal("transaction");
+          }} />
+          <Button title="+ Payment" onPress={() => {
+            setForm({ type: "received" });
+            setModal("transaction");
+          }} />
+          <Button title="+ Expense" onPress={() => openAdd("expense")} />
+        </View>
+
+        <SectionTitle>Business Health</SectionTitle>
+
+        <View style={styles.healthCard}>
+          <Text style={styles.healthNumber}>{healthScore}/100</Text>
+          <Text style={styles.healthText}>
+            {healthScore >= 75
+              ? "Business is looking strong."
+              : healthScore >= 55
+              ? "Business is stable. Kuch areas improve ho sakte hain."
+              : "Business ko close monitoring ki zarurat hai."}
+          </Text>
+        </View>
+
+        <SectionTitle>Smart Advisor</SectionTitle>
+
+        <View style={styles.advisor}>
+          <Text style={styles.advisorIcon}>💡</Text>
+          <Text style={styles.advisorText}>{advisorMessage()}</Text>
+        </View>
+
+        {lowStock.length > 0 && (
+          <>
+            <SectionTitle>Low Stock Alert</SectionTitle>
+            {lowStock.slice(0, 5).map((p) => (
+              <View style={styles.rowCard} key={p.id}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle}>{p.name}</Text>
+                  <Text style={styles.rowSub}>
+                    Stock: {p.stock} • Minimum: {p.low}
+                  </Text>
+                </View>
+                <Text style={styles.warning}>LOW</Text>
+              </View>
+            ))}
+          </>
+        )}
+
+        <SectionTitle>Recent Activity</SectionTitle>
+
+        {data.transactions.slice(0, 5).map((t) => (
+          <View style={styles.rowCard} key={t.id}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowTitle}>{t.party}</Text>
+              <Text style={styles.rowSub}>
+                {t.date} • {t.type}
+              </Text>
+            </View>
+            <Text style={styles.amount}>{money(t.amount)}</Text>
+          </View>
+        ))}
+
+        {data.transactions.length === 0 && (
+          <Text style={styles.empty}>No transactions yet.</Text>
+        )}
+      </ScrollView>
+    );
+  }
+
+  function Khata() {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <SectionTitle>Customers</SectionTitle>
+
+        <Button title="+ Add Customer" onPress={() => openAdd("customer")} />
+
+        {data.customers.map((c) => (
+          <View style={styles.partyCard} key={c.id}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowTitle}>{c.name}</Text>
+              <Text style={styles.rowSub}>{c.phone || "No phone"}</Text>
+              <Text
+                style={[
+                  styles.partyBalance,
+                  c.balance > 0 && styles.dueText,
+                ]}
+              >
+                Balance: {money(c.balance)}
+              </Text>
+            </View>
+
+            <View style={styles.smallActions}>
+              {c.phone ? (
+                <TouchableOpacity
+                  style={styles.iconButton}
+                  onPress={() =>
+                    sendWhatsApp(
+                      c.phone,
+                      `Namaste ${c.name}, aapke account ka pending balance ${money(
+                        c.balance
+                      )} hai. Kripya payment kar dein. - ${
+                        data.business.name
+                      }`
+                    )
+                  }
+                >
+                  <Text>WA</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              <TouchableOpacity
+                style={styles.deleteButton}
+                onPress={() => deleteItem("customers", c.id)}
+              >
+                <Text>×</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ))}
+
+        {data.customers.length === 0 && (
+          <Text style={styles.empty}>Customers add kijiye.</Text>
+        )}
+
+        <SectionTitle>Suppliers</SectionTitle>
+
+        <Button title="+ Add Supplier" onPress={() => openAdd("supplier")} />
+
+        {data.suppliers.map((s) => (
+          <View style={styles.partyCard} key={s.id}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowTitle}>{s.name}</Text>
+              <Text style={styles.rowSub}>{s.phone || "No phone"}</Text>
+              <Text style={styles.partyBalance}>
+                Payable: {money(s.balance)}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => deleteItem("suppliers", s.id)}
+            >
+              <Text>×</Text>
+            </TouchableOpacity>
+          </View>
+        ))}
+      </ScrollView>
+    );
+  }
+
+  function Stock() {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.stockSummary}>
+          <Text style={styles.cardTitle}>Stock Value</Text>
+          <Text style={styles.bigMoney}>{money(stats.stockValue)}</Text>
+          <Text style={styles.rowSub}>
+            {data.products.length} products • {lowStock.length} low stock
+          </Text>
+        </View>
+
+        <Button title="+ Add Product" onPress={() => openAdd("product")} />
+
+        <SectionTitle>Products</SectionTitle>
+
+        {data.products.map((p) => {
+          const margin =
+            Number(p.sell || 0) - Number(p.buy || 0);
+
+          return (
+            <View style={styles.productCard} key={p.id}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowTitle}>{p.name}</Text>
+
+                <Text style={styles.rowSub}>
+                  SKU: {p.sku || "-"}
+                </Text>
+
+                <Text style={styles.rowSub}>
+                  Buy {money(p.buy)} • Sell {money(p.sell)}
+                </Text>
+
+                <Text style={styles.rowSub}>
+                  Margin: {money(margin)} • Stock: {p.stock}
+                </Text>
+              </View>
+
+              <View>
+                {Number(p.stock) <= Number(p.low) && (
+                  <Text style={styles.warning}>LOW</Text>
+                )}
+
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={() => deleteItem("products", p.id)}
+                >
+                  <Text>×</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })}
+
+        {data.products.length === 0 && (
+          <Text style={styles.empty}>Products add kijiye.</Text>
+        )}
+      </ScrollView>
+    );
+  }
+
+  function Reports() {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <SectionTitle>Business Report</SectionTitle>
+
+        <Card title="Sales" value={money(stats.sales)} />
+        <Card title="Purchases" value={money(stats.purchases)} />
+        <Card title="Expenses" value={money(stats.expenses)} />
+        <Card title="Estimated Profit" value={money(stats.profit)} />
+        <Card title="Stock Value" value={money(stats.stockValue)} />
+
+        <SectionTitle>Cash Flow</SectionTitle>
+
+        <View style={styles.reportBox}>
+          <Text style={styles.reportLine}>
+            Money Received{"\n"}
+            <Text style={styles.reportValue}>
+              {money(stats.received)}
+            </Text>
+          </Text>
+
+          <Text style={styles.reportLine}>
+            Money Given{"\n"}
+            <Text style={styles.reportValue}>
+              {money(stats.given)}
+            </Text>
+          </Text>
+
+          <Text style={styles.reportLine}>
+            Net Cash Flow{"\n"}
+            <Text style={styles.reportValue}>
+              {money(stats.received - stats.given)}
+            </Text>
+          </Text>
+        </View>
+
+        <SectionTitle>Expenses</SectionTitle>
+
+        {data.expenses.slice(0, 20).map((e) => (
+          <View style={styles.rowCard} key={e.id}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowTitle}>{e.category}</Text>
+              <Text style={styles.rowSub}>
+                {e.date} • {e.note || "Expense"}
+              </Text>
+            </View>
+
+            <Text style={styles.amount}>{money(e.amount)}</Text>
+          </View>
+        ))}
+
+        {data.expenses.length === 0 && (
+          <Text style={styles.empty}>No expenses recorded.</Text>
+        )}
+
+        <Button
+          title="+ Add Expense"
+          onPress={() => openAdd("expense")}
+        />
+      </ScrollView>
+    );
+  }
+
+  function Smart() {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.smartHero}>
+          <Text style={styles.smartTitle}>Smart Business Advisor</Text>
+          <Text style={styles.smartSub}>
+            Aapke local business data ke basis par simple insights.
+          </Text>
+        </View>
+
+        <View style={styles.healthCard}>
+          <Text style={styles.cardTitle}>Business Health Score</Text>
+          <Text style={styles.healthNumber}>{healthScore}/100</Text>
+        </View>
+
+        <SectionTitle>Today's Insights</SectionTitle>
+
+        <View style={styles.insight}>
+          <Text style={styles.insightTitle}>💰 Profit</Text>
+          <Text style={styles.insightText}>
+            Current estimated profit: {money(stats.profit)}
+          </Text>
+        </View>
+
+        <View style={styles.insight}>
+          <Text style={styles.insightTitle}>📦 Inventory</Text>
+          <Text style={styles.insightText}>
+            Stock value: {money(stats.stockValue)}
+          </Text>
+        </View>
+
+        <View style={styles.insight}>
+          <Text style={styles.insightTitle}>👥 Outstanding</Text>
+          <Text style={styles.insightText}>
+            Customers se {money(stats.receivable)} receive karna hai.
+          </Text>
+        </View>
+
+        <View style={styles.insight}>
+          <Text style={styles.insightTitle}>⚠️ Action</Text>
+          <Text style={styles.insightText}>{advisorMessage()}</Text>
+        </View>
+
+        <SectionTitle>Recommended Actions</SectionTitle>
+
+        <Button
+          title="Add Customer"
+          onPress={() => openAdd("customer")}
+        />
+
+        <Button
+          title="Add Product"
+          onPress={() => openAdd("product")}
+        />
+
+        <Button
+          title="Record Sale"
+          onPress={() => openAdd("transaction")}
+        />
+
+        <Button
+          title="Record Expense"
+          onPress={() => openAdd("expense")}
+        />
+      </ScrollView>
+    );
+  }
+
+  function Settings() {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <SectionTitle>Business Profile</SectionTitle>
+
+        <View style={styles.profileBox}>
+          <Text style={styles.rowTitle}>{data.business.name}</Text>
+          <Text style={styles.rowSub}>
+            Owner: {data.business.owner || "-"}
+          </Text>
+          <Text style={styles.rowSub}>
+            Phone: {data.business.phone || "-"}
+          </Text>
+          <Text style={styles.rowSub}>
+            UPI: {data.business.upi || "-"}
+          </Text>
+          <Text style={styles.rowSub}>
+            GSTIN: {data.business.gstin || "-"}
+          </Text>
+        </View>
+
+        <Button
+          title="Edit Business Profile"
+          onPress={() => {
+            setForm({ ...data.business });
+            setModal("business");
+          }}
+        />
+
+        <SectionTitle>App Data</SectionTitle>
+
+        <Button
+          title="Clear All Local Data"
+          secondary
+          onPress={() => {
+            Alert.alert(
+              "Clear Data",
+              "Saara local business data delete ho jayega.",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Delete",
+                  style: "destructive",
+                  onPress: async () => {
+                    setData(emptyData);
+                    await AsyncStorage.removeItem(DATA_KEY);
+                  },
+                },
+              ]
+            );
+          }}
+        />
+      </ScrollView>
+    );
+  }
+
+  function ModalContent() {
+    if (!modal) return null;
+
+    let title = "";
+
+    if (modal === "customer") title = "Add Customer";
+    if (modal === "supplier") title = "Add Supplier";
+    if (modal === "product") title = "Add Product";
+    if (modal === "transaction") title = "New Transaction";
+    if (modal === "expense") title = "Add Expense";
+    if (modal === "business") title = "Business Profile";
+
+    return (
+      <Modal visible transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <ScrollView>
+              <Text style={styles.modalTitle}>{title}</Text>
+
+              {modal === "customer" && (
+                <>
+                  <Input label="Name" field="name" placeholder="Customer name" />
+                  <Input
+                    label="Phone"
+                    field="phone"
+                    placeholder="10 digit mobile"
+                    keyboardType="phone-pad"
+                  />
+                  <Input
+                    label="Address"
+                    field="address"
+                    placeholder="Address"
+                  />
+                  <Input
+                    label="Opening Balance"
+                    field="balance"
+                    placeholder="0"
+                    keyboardType="numeric"
+                  />
+
+                  <Button title="Save Customer" onPress={addCustomer} />
+                </>
+              )}
+
+              {modal === "supplier" && (
+                <>
+                  <Input label="Name" field="name" placeholder="Supplier name" />
+                  <Input
+                    label="Phone"
+                    field="phone"
+                    placeholder="Mobile"
+                    keyboardType="phone-pad"
+                  />
+                  <Input
+                    label="Payable Balance"
+                    field="balance"
+                    placeholder="0"
+                    keyboardType="numeric"
+                  />
+
+                  <Button title="Save Supplier" onPress={addSupplier} />
+                </>
+              )}
+
+              {modal === "product" && (
+                <>
+                  <Input
+                    label="Product Name"
+                    field="name"
+                    placeholder="Product name"
+                  />
+
+                  <Input
+                    label="SKU"
+                    field="sku"
+                    placeholder="Optional SKU"
+                  />
+
+                  <Input
+                    label="Purchase Price"
+                    field="buy"
+                    placeholder="0"
+                    keyboardType="numeric"
+                  />
+
+                  <Input
+                    label="Selling Price"
+                    field="sell"
+                    placeholder="0"
+                    keyboardType="numeric"
+                  />
+
+                  <Input
+                    label="Current Stock"
+                    field="stock"
+                    placeholder="0"
+                    keyboardType="numeric"
+                  />
+
+                  <Input
+                    label="Low Stock Alert At"
+                    field="low"
+                    placeholder="5"
+                    keyboardType="numeric"
+                  />
+
+                  <Button title="Save Product" onPress={addProduct} />
+                </>
+              )}
+
+              {modal === "transaction" && (
+                <>
+                  <Text style={styles.inputLabel}>Transaction Type</Text>
+
+                  <View style={styles.typeRow}>
+                    {[
+                      ["sale", "Sale"],
+                      ["purchase", "Purchase"],
+                      ["received", "Received"],
+                      ["given", "Given"],
+                    ].map(([value, label]) => (
+                      <TouchableOpacity
+                        key={value}
+                        style={[
+                          styles.typeButton,
+                          (form.type || "sale") === value &&
+                            styles.typeSelected,
+                        ]}
+                        onPress={() => updateForm("type", value)}
+                      >
+                        <Text>{label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Input
+                    label="Party / Customer"
+                    field="party"
+                    placeholder="Name"
+                  />
+
+                  <Input
+                    label="Amount"
+                    field="amount"
+                    placeholder="0"
+                    keyboardType="numeric"
+                  />
+
+                  <Input
+                    label="Note"
+                    field="note"
+                    placeholder="Optional note"
+                  />
+
+                  <Button
+                    title="Save Transaction"
+                    onPress={addTransaction}
+                  />
+                </>
+              )}
+
+              {modal === "expense" && (
+                <>
+                  <Input
+                    label="Category"
+                    field="category"
+                    placeholder="Rent / Salary / Electricity"
+                  />
+
+                  <Input
+                    label="Amount"
+                    field="amount"
+                    placeholder="0"
+                    keyboardType="numeric"
+                  />
+
+                  <Input
+                    label="Note"
+                    field="note"
+                    placeholder="Optional note"
+                  />
+
+                  <Button title="Save Expense" onPress={addExpense} />
+                </>
+              )}
+
+              {modal === "business" && (
+                <>
+                  <Input
+                    label="Business Name"
+                    field="name"
+                    placeholder="Business name"
+                  />
+
+                  <Input
+                    label="Owner"
+                    field="owner"
+                    placeholder="Owner name"
+                  />
+
+                  <Input
+                    label="Phone"
+                    field="phone"
+                    placeholder="Business phone"
+                    keyboardType="phone-pad"
+                  />
+
+                  <Input
+                    label="UPI ID"
+                    field="upi"
+                    placeholder="business@upi"
+                  />
+
+                  <Input
+                    label="GSTIN"
+                    field="gstin"
+                    placeholder="Optional GSTIN"
+                  />
+
+                  <Button
+                    title="Save Profile"
+                    onPress={updateBusiness}
+                  />
+                </>
+              )}
+
+              <Button
+                title="Cancel"
+                secondary
+                onPress={closeModal}
+              />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    );
   }
 
   if (!loaded) {
     return (
-      <SafeAreaView style={styles.center}>
-        <Text style={styles.logo}>Vyapar Khata</Text>
-        <Text>Loading...</Text>
+      <SafeAreaView style={styles.loading}>
+        <Text style={styles.loadingText}>Vyapar Khata loading...</Text>
       </SafeAreaView>
     );
   }
 
-  if (savedPin && pin !== savedPin) {
-    return (
-      <SafeAreaView style={styles.center}>
-        <Text style={styles.logo}>Vyapar Khata</Text>
-        <Text style={styles.subtitle}>Enter PIN</Text>
+  let screen = <Home />;
 
-        <TextInput
-          value={pin}
-          onChangeText={setPin}
-          keyboardType="number-pad"
-          secureTextEntry
-          maxLength={6}
-          style={styles.pinInput}
-          placeholder="PIN"
-        />
-
-        <Pressable style={styles.primary} onPress={() => {}}>
-          <Text style={styles.primaryText}>Unlock</Text>
-        </Pressable>
-      </SafeAreaView>
-    );
-  }
-
-  const totals = calculateTotals(data);
+  if (tab === "Khata") screen = <Khata />;
+  if (tab === "Stock") screen = <Stock />;
+  if (tab === "Reports") screen = <Reports />;
+  if (tab === "Smart") screen = <Smart />;
+  if (tab === "Settings") screen = <Settings />;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" />
 
-      <View style={styles.header}>
+      <View style={styles.topBar}>
         <View>
-          <Text style={styles.headerTitle}>
-            {data.business.name || "Vyapar Khata"}
+          <Text style={styles.appName}>Vyapar Khata</Text>
+          <Text style={styles.topSub}>
+            {data.business.name}
           </Text>
-          <Text style={styles.headerSub}>Smart Business Dashboard</Text>
         </View>
 
-        <Pressable
-          style={styles.iconButton}
-          onPress={() => setModal("business")}
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => setTab("Settings")}
         >
-          <Text>⚙️</Text>
-        </Pressable>
+          <Text style={styles.settingsText}>⚙</Text>
+        </TouchableOpacity>
       </View>
 
-      {screen === "home" && (
-        <Home
-          data={data}
-          totals={totals}
-          go={setScreen}
-          setModal={setModal}
-        />
-      )}
-
-      {screen === "khata" && (
-        <Khata
-          data={data}
-          saveData={saveData}
-          setModal={setModal}
-        />
-      )}
-
-      {screen === "products" && (
-        <Products
-          data={data}
-          saveData={saveData}
-          setModal={setModal}
-        />
-      )}
-
-      {screen === "transactions" && (
-        <Transactions
-          data={data}
-          totals={totals}
-          saveData={saveData}
-        />
-      )}
-
-      {screen === "reports" && (
-        <Reports data={data} totals={totals} />
-      )}
-
-      {screen === "smart" && (
-        <SmartAdvisor
-          data={data}
-          totals={totals}
-          go={setScreen}
-        />
-      )}
+      {screen}
 
       <View style={styles.bottom}>
-        <Bottom
-          current={screen}
-          setScreen={setScreen}
-        />
+        {[
+          ["Home", "⌂"],
+          ["Khata", "₹"],
+          ["Stock", "▣"],
+          ["Reports", "▤"],
+          ["Smart", "✦"],
+        ].map(([name, icon]) => (
+          <TouchableOpacity
+            key={name}
+            style={styles.navItem}
+            onPress={() => setTab(name)}
+          >
+            <Text
+              style={[
+                styles.navIcon,
+                tab === name && styles.navActive,
+              ]}
+            >
+              {icon}
+            </Text>
+
+            <Text
+              style={[
+                styles.navText,
+                tab === name && styles.navActive,
+              ]}
+            >
+              {name}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      {modal === "business" && (
-        <BusinessModal
-          data={data}
-          saveData={saveData}
-          close={() => setModal(null)}
-        />
-      )}
-
-      {modal === "party" && (
-        <PartyModal
-          data={data}
-          saveData={saveData}
-          close={() => setModal(null)}
-        />
-      )}
-
-      {modal === "transaction" && (
-        <TransactionModal
-          data={data}
-          saveData={saveData}
-          close={() => setModal(null)}
-        />
-      )}
-
-      {modal === "product" && (
-        <ProductModal
-          data={data}
-          saveData={saveData}
-          close={() => setModal(null)}
-        />
-      )}
+      {ModalContent()}
     </SafeAreaView>
   );
 }
 
-/* =========================================================
-   CALCULATIONS
-========================================================= */
-
-function calculateTotals(data) {
-  let sales = 0;
-  let purchases = 0;
-  let received = 0;
-  let given = 0;
-  let expenses = 0;
-  let profit = 0;
-
-  data.transactions.forEach((t) => {
-    const amount = Number(t.amount || 0);
-
-    if (t.type === "sale") sales += amount;
-    if (t.type === "purchase") purchases += amount;
-    if (t.type === "received") received += amount;
-    if (t.type === "given") given += amount;
-  });
-
-  data.expenses.forEach((e) => {
-    expenses += Number(e.amount || 0);
-  });
-
-  profit = sales - purchases - expenses;
-
-  return {
-    sales,
-    purchases,
-    received,
-    given,
-    expenses,
-    profit,
-    cash: received - given - expenses,
-  };
-}
-
-function getPartyBalance(data, partyId) {
-  let balance = 0;
-
-  data.transactions.forEach((t) => {
-    if (t.partyId !== partyId) return;
-
-    const amount = Number(t.amount || 0);
-
-    if (
-      t.type === "sale" ||
-      t.type === "given"
-    ) {
-      balance += amount;
-    }
-
-    if (
-      t.type === "received" ||
-      t.type === "purchase"
-    ) {
-      balance -= amount;
-    }
-  });
-
-  return balance;
-}
-
-function getStockValue(data) {
-  return data.products.reduce(
-    (sum, p) =>
-      sum +
-      Number(p.stock || 0) * Number(p.cost || 0),
-    0
-  );
-}
-
-function healthScore(data, totals) {
-  let score = 60;
-
-  if (totals.profit > 0) score += 15;
-  else score -= 15;
-
-  if (totals.received >= totals.given) score += 10;
-  else score -= 10;
-
-  const lowStock = data.products.filter(
-    (p) => Number(p.stock || 0) <= Number(p.minStock || 0)
-  ).length;
-
-  if (lowStock === 0) score += 10;
-  else score -= Math.min(10, lowStock * 2);
-
-  if (data.customers.length > 0) score += 5;
-
-  return Math.max(0, Math.min(100, score));
-}
-
-/* =========================================================
-   HOME
-========================================================= */
-
-function Home({ data, totals, go, setModal }) {
-  const score = healthScore(data, totals);
-
-  const pendingCustomers = data.customers
-    .map((c) => ({
-      ...c,
-      balance: getPartyBalance(data, c.id),
-    }))
-    .filter((c) => c.balance > 0)
-    .sort((a, b) => b.balance - a.balance);
-
-  const lowStock = data.products.filter(
-    (p) =>
-      Number(p.stock || 0) <= Number(p.minStock || 0)
-  );
-
-  return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <View style={styles.hero}>
-        <View>
-          <Text style={styles.heroSmall}>
-            BUSINESS HEALTH
-          </Text>
-
-          <Text style={styles.score}>
-            {score}/100
-          </Text>
-
-          <Text style={styles.heroText}>
-            {score >= 75
-              ? "Business is looking strong 🚀"
-              : score >= 50
-              ? "Business needs attention"
-              : "Some areas need action"}
-          </Text>
-        </View>
-
-        <Text style={styles.heroEmoji}>
-          {score >= 75 ? "🟢" : score >= 50 ? "🟡" : "🔴"}
-        </Text>
-      </View>
-
-      <View style={styles.grid}>
-        <Stat title="Sales" value={money(totals.sales)} />
-        <Stat title="Purchase" value={money(totals.purchases)} />
-        <Stat title="Expenses" value={money(totals.expenses)} />
-        <Stat
-          title="Profit"
-          value={money(totals.profit)}
-          positive={totals.profit >= 0}
-        />
-      </View>
-
-      <SectionTitle title="Quick Actions" />
-
-      <View style={styles.grid}>
-        <Action
-          icon="👤"
-          title="Add Customer"
-          onPress={() => setModal("party")}
-        />
-
-        <Action
-          icon="💰"
-          title="Payment"
-          onPress={() => setModal("transaction")}
-        />
-
-        <Action
-          icon="📦"
-          title="Add Product"
-          onPress={() => setModal("product")}
-        />
-
-        <Action
-          icon="🧠"
-          title="AI Advisor"
-          onPress={() => go("smart")}
-        />
-      </View>
-
-      <SectionTitle title="Smart Alerts" />
-
-      {pendingCustomers.length > 0 && (
-        <Card>
-          <Text style={styles.cardTitle}>
-            🔴 Payment Collection
-          </Text>
-
-          <Text style={styles.cardText}>
-            {pendingCustomers.length} customer(s) owe you{" "}
-            {money(
-              pendingCustomers.reduce(
-                (s, x) => s + x.balance,
-                0
-              )
-            )}
-          </Text>
-
-          <Pressable
-            style={styles.smallButton}
-            onPress={() => go("khata")}
-          >
-            <Text style={styles.smallButtonText}>
-              View Dues
-            </Text>
-          </Pressable>
-        </Card>
-      )}
-
-      {lowStock.length > 0 && (
-        <Card>
-          <Text style={styles.cardTitle}>
-            📦 Low Stock Alert
-          </Text>
-
-          <Text style={styles.cardText}>
-            {lowStock.length} product(s) need restocking.
-          </Text>
-
-          <Pressable
-            style={styles.smallButton}
-            onPress={() => go("products")}
-          >
-            <Text style={styles.smallButtonText}>
-              Check Stock
-            </Text>
-          </Pressable>
-        </Card>
-      )}
-
-      <Card>
-        <Text style={styles.cardTitle}>
-          🧠 Today's Business Advice
-        </Text>
-
-        <Text style={styles.cardText}>
-          {totals.profit > 0
-            ? `Your current recorded profit is ${money(
-                totals.profit
-              )}. Focus on collecting pending customer payments.`
-            : "Record today's sales, purchases and expenses to get a more accurate business health score."}
-        </Text>
-      </Card>
-
-      <SectionTitle title="Business Modules" />
-
-      <MenuButton
-        title="📒 Khata & Customers"
-        subtitle="Customers, suppliers, dues and payment history"
-        onPress={() => go("khata")}
-      />
-
-      <MenuButton
-        title="📦 Products & Stock"
-        subtitle="Stock, low-stock alerts and product value"
-        onPress={() => go("products")}
-      />
-
-      <MenuButton
-        title="🧾 Transactions"
-        subtitle="Sales, purchases, received and given"
-        onPress={() => go("transactions")}
-      />
-
-      <MenuButton
-        title="📊 Advanced Reports"
-        subtitle="Profit, cash flow and business numbers"
-        onPress={() => go("reports")}
-      />
-
-      <MenuButton
-        title="🧠 Smart Business Advisor"
-        subtitle="Automatic business recommendations"
-        onPress={() => go("smart")}
-      />
-    </ScrollView>
-  );
-}
-
-/* =========================================================
-   SMART ADVISOR
-========================================================= */
-
-function SmartAdvisor({ data, totals, go }) {
-  const score = healthScore(data, totals);
-
-  const dues = data.customers
-    .map((c) => ({
-      ...c,
-      balance: getPartyBalance(data, c.id),
-    }))
-    .filter((c) => c.balance > 0)
-    .sort((a, b) => b.balance - a.balance);
-
-  const lowStock = data.products.filter(
-    (p) =>
-      Number(p.stock || 0) <= Number(p.minStock || 0)
-  );
-
-  const advice = [];
-
-  if (dues.length) {
-    advice.push({
-      icon: "💰",
-      title: "Collect pending payments",
-      text: `${dues[0].name} has the highest outstanding amount: ${money(
-        dues[0].balance
-      )}.`,
-    });
-  }
-
-  if (lowStock.length) {
-    advice.push({
-      icon: "📦",
-      title: "Restock products",
-      text: `${lowStock
-        .slice(0, 3)
-        .map((p) => p.name)
-        .join(", ")} need stock attention.`,
-    });
-  }
-
-  if (totals.expenses > totals.sales * 0.3) {
-    advice.push({
-      icon: "⚠️",
-      title: "Watch expenses",
-      text: "Your recorded expenses are relatively high compared with sales.",
-    });
-  }
-
-  if (totals.profit > 0) {
-    advice.push({
-      icon: "🚀",
-      title: "Positive profit",
-      text: `Recorded profit is ${money(
-        totals.profit
-      )}. Keep monitoring margins.`,
-    });
-  } else {
-    advice.push({
-      icon: "📈",
-      title: "Improve profitability",
-      text: "Record complete sales, purchase and expense data to identify where margin is being lost.",
-    });
-  }
-
-  return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <Text style={styles.pageTitle}>
-        🧠 Smart Business Advisor
-      </Text>
-
-      <View style={styles.hero}>
-        <View>
-          <Text style={styles.heroSmall}>
-            BUSINESS SCORE
-          </Text>
-          <Text style={styles.score}>
-            {score}/100
-          </Text>
-        </View>
-
-        <Text style={styles.heroEmoji}>🧠</Text>
-      </View>
-
-      {advice.map((a, i) => (
-        <Card key={i}>
-          <Text style={styles.cardTitle}>
-            {a.icon} {a.title}
-          </Text>
-          <Text style={styles.cardText}>
-            {a.text}
-          </Text>
-        </Card>
-      ))}
-
-      <Card>
-        <Text style={styles.cardTitle}>
-          📌 Important
-        </Text>
-
-        <Text style={styles.cardText}>
-          This version uses your recorded business data
-          to generate automatic recommendations. It does
-          not pretend to be a real external AI service.
-        </Text>
-      </Card>
-
-      <MenuButton
-        title="← Back to Dashboard"
-        subtitle="Return to your business overview"
-        onPress={() => go("home")}
-      />
-    </ScrollView>
-  );
-}
-
-/* =========================================================
-   KHATA
-========================================================= */
-
-function Khata({ data, saveData, setModal }) {
-  const [search, setSearch] = useState("");
-
-  const customers = data.customers
-    .map((c) => ({
-      ...c,
-      balance: getPartyBalance(data, c.id),
-    }))
-    .filter((c) =>
-      c.name.toLowerCase().includes(search.toLowerCase())
-    );
-
-  const suppliers = data.suppliers
-    .map((s) => ({
-      ...s,
-      balance: getPartyBalance(data, s.id),
-    }))
-    .filter((s) =>
-      s.name.toLowerCase().includes(search.toLowerCase())
-    );
-
-  return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <Text style={styles.pageTitle}>
-        📒 Khata
-      </Text>
-
-      <TextInput
-        style={styles.input}
-        placeholder="Search customer / supplier"
-        value={search}
-        onChangeText={setSearch}
-      />
-
-      <Pressable
-        style={styles.primary}
-        onPress={() => setModal("party")}
-      >
-        <Text style={styles.primaryText}>
-          + Add Customer / Supplier
-        </Text>
-      </Pressable>
-
-      <SectionTitle title="Customers" />
-
-      {customers.length === 0 && (
-        <Empty text="No customers yet" />
-      )}
-
-      {customers.map((c) => (
-        <PartyCard
-          key={c.id}
-          party={c}
-          customer
-        />
-      ))}
-
-      <SectionTitle title="Suppliers" />
-
-      {suppliers.length === 0 && (
-        <Empty text="No suppliers yet" />
-      )}
-
-      {suppliers.map((s) => (
-        <PartyCard
-          key={s.id}
-          party={s}
-        />
-      ))}
-    </ScrollView>
-  );
-}
-
-function PartyCard({ party, customer }) {
-  function whatsapp() {
-    if (!party.phone) {
-      Alert.alert("Phone number missing");
-      return;
-    }
-
-    const amount = money(Math.abs(party.balance));
-
-    const message = customer
-      ? `Namaste ${party.name}, aapke account me ${amount} payment pending hai. Kripya payment kar dein.`
-      : `Namaste ${party.name}, aapka ${amount} payable amount record me pending hai.`;
-
-    const url =
-      "whatsapp://send?phone=" +
-      party.phone +
-      "&text=" +
-      encodeURIComponent(message);
-
-    Linking.openURL(url).catch(() =>
-      Alert.alert("WhatsApp available nahi hai.")
-    );
-  }
-
-  return (
-    <Card>
-      <View style={styles.row}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.cardTitle}>
-            {party.name}
-          </Text>
-
-          <Text style={styles.cardText}>
-            {party.phone || "No phone"}
-          </Text>
-
-          <Text
-            style={[
-              styles.balance,
-              party.balance > 0
-                ? styles.due
-                : styles.clear,
-            ]}
-          >
-            {party.balance > 0
-              ? `You will receive ${money(party.balance)}`
-              : party.balance < 0
-              ? `You will give ${money(
-                  Math.abs(party.balance)
-                )}`
-              : "Settled"}
-          </Text>
-        </View>
-
-        {party.balance > 0 && (
-          <Pressable
-            style={styles.whatsapp}
-            onPress={whatsapp}
-          >
-            <Text style={styles.whatsappText}>
-              WhatsApp
-            </Text>
-          </Pressable>
-        )}
-      </View>
-    </Card>
-  );
-}
-
-/* =========================================================
-   PRODUCTS
-========================================================= */
-
-function Products({ data, saveData, setModal }) {
-  const stockValue = getStockValue(data);
-
-  const lowStock = data.products.filter(
-    (p) =>
-      Number(p.stock || 0) <= Number(p.minStock || 0)
-  );
-
-  return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <Text style={styles.pageTitle}>
-        📦 Products & Stock
-      </Text>
-
-      <View style={styles.grid}>
-        <Stat
-          title="Products"
-          value={String(data.products.length)}
-        />
-
-        <Stat
-          title="Stock Value"
-          value={money(stockValue)}
-        />
-      </View>
-
-      <Pressable
-        style={styles.primary}
-        onPress={() => setModal("product")}
-      >
-        <Text style={styles.primaryText}>
-          + Add Product
-        </Text>
-      </Pressable>
-
-      {lowStock.length > 0 && (
-        <Card>
-          <Text style={styles.cardTitle}>
-            🔴 Low Stock
-          </Text>
-
-          {lowStock.map((p) => (
-            <Text
-              key={p.id}
-              style={styles.cardText}
-            >
-              {p.name}: {p.stock} {p.unit || "pcs"}
-            </Text>
-          ))}
-        </Card>
-      )}
-
-      <SectionTitle title="All Products" />
-
-      {data.products.map((p) => (
-        <Card key={p.id}>
-          <Text style={styles.cardTitle}>
-            {p.name}
-          </Text>
-
-          <Text style={styles.cardText}>
-            Sale: {money(p.price)} • Cost: {money(p.cost)}
-          </Text>
-
-          <Text style={styles.cardText}>
-            Stock: {p.stock} {p.unit || "pcs"}
-          </Text>
-
-          <Text style={styles.cardText}>
-            Margin:{" "}
-            {Number(p.price) > 0
-              ? Math.round(
-                  ((Number(p.price) -
-                    Number(p.cost)) /
-                    Number(p.price)) *
-                    100
-                )
-              : 0}
-            %
-          </Text>
-        </Card>
-      ))}
-
-      {data.products.length === 0 && (
-        <Empty text="No products added yet" />
-      )}
-    </ScrollView>
-  );
-}
-
-/* =========================================================
-   TRANSACTIONS
-========================================================= */
-
-function Transactions({ data, totals, saveData }) {
-  return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <Text style={styles.pageTitle}>
-        🧾 Transactions
-      </Text>
-
-      <View style={styles.grid}>
-        <Stat
-          title="Sales"
-          value={money(totals.sales)}
-        />
-        <Stat
-          title="Purchases"
-          value={money(totals.purchases)}
-        />
-        <Stat
-          title="Received"
-          value={money(totals.received)}
-        />
-        <Stat
-          title="Given"
-          value={money(totals.given)}
-        />
-      </View>
-
-      {data.transactions
-        .slice()
-        .reverse()
-        .map((t) => (
-          <Card key={t.id}>
-            <View style={styles.row}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>
-                  {transactionName(t.type)}
-                </Text>
-
-                <Text style={styles.cardText}>
-                  {t.note || "Transaction"}
-                </Text>
-
-                <Text style={styles.cardText}>
-                  {t.date || today()}
-                </Text>
-              </View>
-
-              <Text style={styles.amount}>
-                {money(t.amount)}
-              </Text>
-            </View>
-          </Card>
-        ))}
-
-      {data.transactions.length === 0 && (
-        <Empty text="No transactions yet" />
-      )}
-    </ScrollView>
-  );
-}
-
-function transactionName(type) {
-  const names = {
-    sale: "Sale",
-    purchase: "Purchase",
-    received: "Payment Received",
-    given: "Payment Given",
-  };
-
-  return names[type] || type;
-}
-
-/* =========================================================
-   REPORTS
-========================================================= */
-
-function Reports({ data, totals }) {
-  const stockValue = getStockValue(data);
-
-  const receivable = data.customers.reduce(
-    (s, c) =>
-      s + Math.max(0, getPartyBalance(data, c.id)),
-    0
-  );
-
-  const payable = data.suppliers.reduce(
-    (s, c) =>
-      s + Math.max(0, -getPartyBalance(data, c.id)),
-    0
-  );
-
-  return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <Text style={styles.pageTitle}>
-        📊 Advanced Reports
-      </Text>
-
-      <SectionTitle title="Financial Overview" />
-
-      <Report
-        title="Total Sales"
-        value={money(totals.sales)}
-      />
-
-      <Report
-        title="Total Purchase"
-        value={money(totals.purchases)}
-      />
-
-      <Report
-        title="Total Expenses"
-        value={money(totals.expenses)}
-      />
-
-      <Report
-        title="Estimated Profit"
-        value={money(totals.profit)}
-      />
-
-      <SectionTitle title="Cash Flow" />
-
-      <Report
-        title="Money Received"
-        value={money(totals.received)}
-      />
-
-      <Report
-        title="Money Given"
-        value={money(totals.given)}
-      />
-
-      <Report
-        title="Net Cash Movement"
-        value={money(totals.cash)}
-      />
-
-      <SectionTitle title="Business Position" />
-
-      <Report
-        title="Customer Receivable"
-        value={money(receivable)}
-      />
-
-      <Report
-        title="Supplier Payable"
-        value={money(payable)}
-      />
-
-      <Report
-        title="Stock Value"
-        value={money(stockValue)}
-      />
-
-      <Card>
-        <Text style={styles.cardTitle}>
-          📈 Profit Insight
-        </Text>
-
-        <Text style={styles.cardText}>
-          {totals.sales > 0
-            ? `Estimated profit margin: ${Math.round(
-                (totals.profit / totals.sales) * 100
-              )}%`
-            : "Add sales to calculate margin."}
-        </Text>
-      </Card>
-    </ScrollView>
-  );
-}
-
-function Report({ title, value }) {
-  return (
-    <View style={styles.report}>
-      <Text style={styles.reportTitle}>
-        {title}
-      </Text>
-      <Text style={styles.reportValue}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-/* =========================================================
-   MODALS
-========================================================= */
-
-function BusinessModal({ data, saveData, close }) {
-  const [business, setBusiness] = useState({
-    ...data.business,
-  });
-
-  async function save() {
-    await saveData({
-      ...data,
-      business,
-    });
-
-    close();
-  }
-
-  return (
-    <Modal animationType="slide">
-      <SafeAreaView style={styles.modal}>
-        <Text style={styles.pageTitle}>
-          Business Profile
-        </Text>
-
-        <Input
-          label="Business Name"
-          value={business.name}
-          onChangeText={(v) =>
-            setBusiness({ ...business, name: v })
-          }
-        />
-
-        <Input
-          label="Owner"
-          value={business.owner}
-          onChangeText={(v) =>
-            setBusiness({ ...business, owner: v })
-          }
-        />
-
-        <Input
-          label="Phone"
-          value={business.phone}
-          keyboardType="phone-pad"
-          onChangeText={(v) =>
-            setBusiness({ ...business, phone: v })
-          }
-        />
-
-        <Input
-          label="UPI ID"
-          value={business.upi}
-          onChangeText={(v) =>
-            setBusiness({ ...business, upi: v })
-          }
-        />
-
-        <Input
-          label="GSTIN"
-          value={business.gstin}
-          onChangeText={(v) =>
-            setBusiness({ ...business, gstin: v })
-          }
-        />
-
-        <Pressable style={styles.primary} onPress={save}>
-          <Text style={styles.primaryText}>
-            Save Business
-          </Text>
-        </Pressable>
-
-        <Pressable style={styles.cancel} onPress={close}>
-          <Text>Cancel</Text>
-        </Pressable>
-      </SafeAreaView>
-    </Modal>
-  );
-}
-
-function PartyModal({ data, saveData, close }) {
-  const [type, setType] = useState("customer");
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-
-  async function chooseContact() {
-    try {
-      const permission =
-        await Contacts.requestPermissionsAsync();
-
-      if (permission.status !== "granted") {
-        Alert.alert(
-          "Permission required",
-          "Contacts permission allow karein."
-        );
-        return;
-      }
-
-      const result =
-        await Contacts.presentContactPickerAsync();
-
-      const contact =
-        result?.contact || result;
-
-      if (contact) {
-        const fullName =
-          contact.name ||
-          `${contact.firstName || ""} ${
-            contact.lastName || ""
-          }`.trim();
-
-        const number =
-          contact.phoneNumbers?.[0]?.number || "";
-
-        setName(fullName);
-        setPhone(number);
-      }
-    } catch (e) {
-      Alert.alert(
-        "Contact error",
-        "Contact select nahi ho paya."
-      );
-    }
-  }
-
-  async function save() {
-    if (!name.trim()) {
-      Alert.alert("Name required");
-      return;
-    }
-
-    const party = {
-      id: id(),
-      name: name.trim(),
-      phone: phone.trim(),
-      createdAt: today(),
-    };
-
-    const next = {
-      ...data,
-      customers:
-        type === "customer"
-          ? [...data.customers, party]
-          : data.customers,
-      suppliers:
-        type === "supplier"
-          ? [...data.suppliers, party]
-          : data.suppliers,
-    };
-
-    await saveData(next);
-    close();
-  }
-
-  return (
-    <Modal animationType="slide">
-      <SafeAreaView style={styles.modal}>
-        <ScrollView>
-          <Text style={styles.pageTitle}>
-            Add Party
-          </Text>
-
-          <View style={styles.segment}>
-            <Pressable
-              style={[
-                styles.segmentButton,
-                type === "customer" &&
-                  styles.segmentActive,
-              ]}
-              onPress={() => setType("customer")}
-            >
-              <Text>Customer</Text>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.segmentButton,
-                type === "supplier" &&
-                  styles.segmentActive,
-              ]}
-              onPress={() => setType("supplier")}
-            >
-              <Text>Supplier</Text>
-            </Pressable>
-          </View>
-
-          <Pressable
-            style={styles.secondary}
-            onPress={chooseContact}
-          >
-            <Text>
-              📱 Choose from Phone Contacts
-            </Text>
-          </Pressable>
-
-          <Input
-            label="Name"
-            value={name}
-            onChangeText={setName}
-          />
-
-          <Input
-            label="Phone"
-            value={phone}
-            keyboardType="phone-pad"
-            onChangeText={setPhone}
-          />
-
-          <Pressable style={styles.primary} onPress={save}>
-            <Text style={styles.primaryText}>
-              Save Party
-            </Text>
-          </Pressable>
-
-          <Pressable style={styles.cancel} onPress={close}>
-            <Text>Cancel</Text>
-          </Pressable>
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
-  );
-}
-
-function ProductModal({ data, saveData, close }) {
-  const [name, setName] = useState("");
-  const [price, setPrice] = useState("");
-  const [cost, setCost] = useState("");
-  const [stock, setStock] = useState("");
-  const [minStock, setMinStock] = useState("");
-  const [unit, setUnit] = useState("pcs");
-
-  async function save() {
-    if (!name.trim()) {
-      Alert.alert("Product name required");
-      return;
-    }
-
-    const product = {
-      id: id(),
-      name: name.trim(),
-      price: Number(price || 0),
-      cost: Number(cost || 0),
-      stock: Number(stock || 0),
-      minStock: Number(minStock || 0),
-      unit,
-      createdAt: today(),
-    };
-
-    await saveData({
-      ...data,
-      products: [...data.products, product],
-    });
-
-    close();
-  }
-
-  return (
-    <Modal animationType="slide">
-      <SafeAreaView style={styles.modal}>
-        <ScrollView>
-          <Text style={styles.pageTitle}>
-            Add Product
-          </Text>
-
-          <Input
-            label="Product Name"
-            value={name}
-            onChangeText={setName}
-          />
-
-          <Input
-            label="Selling Price"
-            value={price}
-            keyboardType="decimal-pad"
-            onChangeText={setPrice}
-          />
-
-          <Input
-            label="Purchase / Cost Price"
-            value={cost}
-            keyboardType="decimal-pad"
-            onChangeText={setCost}
-          />
-
-          <Input
-            label="Current Stock"
-            value={stock}
-            keyboardType="decimal-pad"
-            onChangeText={setStock}
-          />
-
-          <Input
-            label="Minimum Stock Alert"
-            value={minStock}
-            keyboardType="decimal-pad"
-            onChangeText={setMinStock}
-          />
-
-          <Input
-            label="Unit"
-            value={unit}
-            onChangeText={setUnit}
-          />
-
-          <Pressable style={styles.primary} onPress={save}>
-            <Text style={styles.primaryText}>
-              Save Product
-            </Text>
-          </Pressable>
-
-          <Pressable style={styles.cancel} onPress={close}>
-            <Text>Cancel</Text>
-          </Pressable>
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
-  );
-}
-
-function TransactionModal({ data, saveData, close }) {
-  const [type, setType] = useState("sale");
-  const [amount, setAmount] = useState("");
-  const [note, setNote] = useState("");
-
-  async function save() {
-    const value = Number(amount || 0);
-
-    if (value <= 0) {
-      Alert.alert("Amount enter karein");
-      return;
-    }
-
-    const transaction = {
-      id: id(),
-      type,
-      amount: value,
-      note,
-      date: today(),
-    };
-
-    await saveData({
-      ...data,
-      transactions: [
-        ...data.transactions,
-        transaction,
-      ],
-    });
-
-    close();
-  }
-
-  return (
-    <Modal animationType="slide">
-      <SafeAreaView style={styles.modal}>
-        <ScrollView>
-          <Text style={styles.pageTitle}>
-            Add Transaction
-          </Text>
-
-          <View style={styles.wrap}>
-            {[
-              ["sale", "Sale"],
-              ["purchase", "Purchase"],
-              ["received", "Received"],
-              ["given", "Given"],
-            ].map(([v, label]) => (
-              <Pressable
-                key={v}
-                style={[
-                  styles.typeButton,
-                  type === v &&
-                    styles.typeActive,
-                ]}
-                onPress={() => setType(v)}
-              >
-                <Text>{label}</Text>
-              </Pressable>
-            ))}
-          </View>
-
-          <Input
-            label="Amount"
-            value={amount}
-            keyboardType="decimal-pad"
-            onChangeText={setAmount}
-          />
-
-          <Input
-            label="Note"
-            value={note}
-            onChangeText={setNote}
-          />
-
-          <Pressable style={styles.primary} onPress={save}>
-            <Text style={styles.primaryText}>
-              Save Transaction
-            </Text>
-          </Pressable>
-
-          <Pressable style={styles.cancel} onPress={close}>
-            <Text>Cancel</Text>
-          </Pressable>
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
-  );
-}
-
-/* =========================================================
-   UI COMPONENTS
-========================================================= */
-
-function Bottom({ current, setScreen }) {
-  const items = [
-    ["home", "🏠", "Home"],
-    ["khata", "📒", "Khata"],
-    ["products", "📦", "Stock"],
-    ["reports", "📊", "Reports"],
-    ["smart", "🧠", "Smart"],
-  ];
-
-  return (
-    <>
-      {items.map(([screen, icon, title]) => (
-        <Pressable
-          key={screen}
-          style={styles.navItem}
-          onPress={() => setScreen(screen)}
-        >
-          <Text style={styles.navIcon}>
-            {icon}
-          </Text>
-
-          <Text
-            style={[
-              styles.navText,
-              current === screen &&
-                styles.navSelected,
-            ]}
-          >
-            {title}
-          </Text>
-        </Pressable>
-      ))}
-    </>
-  );
-}
-
-function Stat({ title, value }) {
-  return (
-    <View style={styles.stat}>
-      <Text style={styles.statTitle}>
-        {title}
-      </Text>
-
-      <Text style={styles.statValue}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function Action({ icon, title, onPress }) {
-  return (
-    <Pressable
-      style={styles.action}
-      onPress={onPress}
-    >
-      <Text style={styles.actionIcon}>
-        {icon}
-      </Text>
-
-      <Text style={styles.actionText}>
-        {title}
-      </Text>
-    </Pressable>
-  );
-}
-
-function MenuButton({ title, subtitle, onPress }) {
-  return (
-    <Pressable
-      style={styles.menu}
-      onPress={onPress}
-    >
-      <Text style={styles.menuTitle}>
-        {title}
-      </Text>
-
-      <Text style={styles.menuSub}>
-        {subtitle}
-      </Text>
-    </Pressable>
-  );
-}
-
-function Card({ children }) {
-  return <View style={styles.card}>{children}</View>;
-}
-
-function SectionTitle({ title }) {
-  return (
-    <Text style={styles.sectionTitle}>
-      {title}
-    </Text>
-  );
-}
-
-function Empty({ text }) {
-  return (
-    <View style={styles.empty}>
-      <Text>{text}</Text>
-    </View>
-  );
-}
-
-function Input({
-  label,
-  value,
-  onChangeText,
-  keyboardType,
-}) {
-  return (
-    <View style={{ marginBottom: 14 }}>
-      <Text style={styles.inputLabel}>
-        {label}
-      </Text>
-
-      <TextInput
-        style={styles.input}
-        value={value}
-        onChangeText={onChangeText}
-        keyboardType={keyboardType}
-        placeholder={label}
-      />
-    </View>
-  );
-}
-
-/* =========================================================
-   STYLES
-========================================================= */
-
 const styles = StyleSheet.create({
-  container: {
+  safe: {
     flex: 1,
-    backgroundColor: "#F5F7FA",
+    backgroundColor: "#F5F7FB",
   },
 
-  center: {
+  loading: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F5F7FA",
-    padding: 24,
+    backgroundColor: "#F5F7FB",
   },
 
-  logo: {
-    fontSize: 30,
-    fontWeight: "800",
-    marginBottom: 8,
+  loadingText: {
+    fontSize: 18,
+    fontWeight: "700",
   },
 
-  subtitle: {
-    color: "#666",
-    marginBottom: 20,
-  },
-
-  header: {
-    minHeight: 70,
+  topBar: {
+    minHeight: 68,
     paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingTop: 10,
+    paddingBottom: 8,
     backgroundColor: "#FFFFFF",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
+    borderBottomColor: "#E9EDF3",
   },
 
-  headerTitle: {
-    fontSize: 20,
+  appName: {
+    fontSize: 21,
     fontWeight: "800",
   },
 
-  headerSub: {
-    color: "#6B7280",
+  topSub: {
+    color: "#777",
+    marginTop: 2,
     fontSize: 12,
-    marginTop: 3,
   },
 
-  iconButton: {
+  settingsButton: {
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: "#F1F5F9",
+    backgroundColor: "#F0F2F5",
     alignItems: "center",
     justifyContent: "center",
   },
 
-  content: {
-    padding: 16,
-    paddingBottom: 100,
+  settingsText: {
+    fontSize: 21,
   },
 
-  pageTitle: {
-    fontSize: 26,
-    fontWeight: "800",
-    marginBottom: 16,
+  container: {
+    padding: 16,
+    paddingBottom: 110,
   },
 
   hero: {
@@ -1663,324 +1196,409 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     padding: 22,
     marginBottom: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
   },
 
   heroSmall: {
-    color: "#CBD5E1",
+    color: "#AAB2C0",
     fontSize: 11,
-    fontWeight: "700",
+    fontWeight: "800",
     letterSpacing: 1,
   },
 
-  score: {
+  heroTitle: {
     color: "#FFFFFF",
-    fontSize: 38,
+    fontSize: 27,
     fontWeight: "900",
-    marginTop: 4,
+    marginTop: 7,
   },
 
-  heroText: {
-    color: "#E5E7EB",
-    marginTop: 2,
-  },
-
-  heroEmoji: {
-    fontSize: 48,
+  heroSub: {
+    color: "#C7CDD8",
+    marginTop: 5,
   },
 
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 10,
-    marginBottom: 10,
+    justifyContent: "space-between",
   },
 
-  stat: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 16,
+  card: {
     width: "48%",
-    minHeight: 85,
-    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#ECEFF4",
   },
 
-  statTitle: {
-    color: "#6B7280",
+  cardTitle: {
+    color: "#707784",
     fontSize: 12,
-    marginBottom: 5,
+    fontWeight: "700",
   },
 
-  statValue: {
-    fontSize: 18,
-    fontWeight: "800",
+  cardValue: {
+    fontSize: 20,
+    fontWeight: "900",
+    marginTop: 8,
+  },
+
+  cardSub: {
+    color: "#8B919B",
+    marginTop: 5,
+    fontSize: 11,
   },
 
   sectionTitle: {
     fontSize: 18,
-    fontWeight: "800",
+    fontWeight: "900",
     marginTop: 18,
     marginBottom: 10,
   },
 
-  action: {
-    width: "48%",
+  actionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+
+  button: {
+    backgroundColor: "#111827",
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 10,
+    alignItems: "center",
+    minWidth: "47%",
+  },
+
+  buttonText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 14,
+  },
+
+  secondaryButton: {
+    backgroundColor: "#EEF0F3",
+  },
+
+  secondaryButtonText: {
+    color: "#222",
+  },
+
+  healthCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 20,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E9EDF3",
+  },
+
+  healthNumber: {
+    fontSize: 38,
+    fontWeight: "900",
+    marginTop: 5,
+  },
+
+  healthText: {
+    color: "#6D7480",
+    textAlign: "center",
+    marginTop: 6,
+  },
+
+  advisor: {
+    backgroundColor: "#FFF8E7",
+    borderRadius: 18,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+
+  advisorIcon: {
+    fontSize: 23,
+    marginRight: 10,
+  },
+
+  advisorText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 21,
+    color: "#574A22",
+    fontWeight: "600",
+  },
+
+  rowCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 16,
-    padding: 16,
-    minHeight: 95,
-    justifyContent: "center",
-  },
-
-  actionIcon: {
-    fontSize: 26,
-    marginBottom: 8,
-  },
-
-  actionText: {
-    fontWeight: "700",
-  },
-
-  card: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 17,
-    padding: 17,
-    marginBottom: 11,
-  },
-
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    marginBottom: 6,
-  },
-
-  cardText: {
-    color: "#6B7280",
-    lineHeight: 21,
-  },
-
-  smallButton: {
-    alignSelf: "flex-start",
-    backgroundColor: "#111827",
-    paddingHorizontal: 15,
-    paddingVertical: 9,
-    borderRadius: 10,
-    marginTop: 12,
-  },
-
-  smallButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-  },
-
-  primary: {
-    backgroundColor: "#111827",
-    paddingVertical: 15,
-    paddingHorizontal: 18,
-    borderRadius: 13,
-    alignItems: "center",
-    marginBottom: 12,
-  },
-
-  primaryText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-    fontSize: 15,
-  },
-
-  secondary: {
-    backgroundColor: "#E5E7EB",
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    marginBottom: 15,
-  },
-
-  cancel: {
-    alignItems: "center",
     padding: 15,
-  },
-
-  inputLabel: {
-    fontSize: 13,
-    fontWeight: "700",
-    marginBottom: 6,
-    color: "#374151",
-  },
-
-  input: {
-    backgroundColor: "#FFFFFF",
+    marginBottom: 9,
+    flexDirection: "row",
+    alignItems: "center",
     borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 16,
+    borderColor: "#ECEFF4",
   },
 
-  pinInput: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 12,
-    padding: 14,
-    width: "80%",
-    textAlign: "center",
-    fontSize: 22,
-    marginVertical: 15,
-  },
-
-  balance: {
-    marginTop: 8,
+  rowTitle: {
+    fontSize: 15,
     fontWeight: "800",
   },
 
-  due: {
-    color: "#DC2626",
-  },
-
-  clear: {
-    color: "#16A34A",
-  },
-
-  whatsapp: {
-    backgroundColor: "#DCFCE7",
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 10,
-  },
-
-  whatsappText: {
-    fontWeight: "700",
+  rowSub: {
+    fontSize: 12,
+    color: "#777F8B",
+    marginTop: 4,
   },
 
   amount: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: "900",
   },
 
-  report: {
+  warning: {
+    color: "#B45309",
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    fontSize: 10,
+    fontWeight: "900",
+  },
+
+  empty: {
+    textAlign: "center",
+    color: "#8A919C",
+    paddingVertical: 20,
+  },
+
+  partyCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 14,
+    borderRadius: 18,
     padding: 16,
-    marginBottom: 9,
+    marginBottom: 10,
     flexDirection: "row",
-    justifyContent: "space-between",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#ECEFF4",
+  },
+
+  partyBalance: {
+    marginTop: 7,
+    fontWeight: "800",
+  },
+
+  dueText: {
+    color: "#B45309",
+  },
+
+  smallActions: {
+    flexDirection: "row",
+    gap: 7,
     alignItems: "center",
   },
 
-  reportTitle: {
-    color: "#6B7280",
+  iconButton: {
+    backgroundColor: "#E8F5E9",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 9,
+  },
+
+  deleteButton: {
+    backgroundColor: "#F3F4F6",
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 8,
+  },
+
+  stockSummary: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 12,
+  },
+
+  bigMoney: {
+    fontSize: 30,
+    fontWeight: "900",
+    marginTop: 5,
+  },
+
+  productCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 10,
+    flexDirection: "row",
+    borderWidth: 1,
+    borderColor: "#ECEFF4",
+  },
+
+  reportBox: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 18,
+  },
+
+  reportLine: {
+    color: "#666",
+    marginBottom: 16,
+    lineHeight: 21,
   },
 
   reportValue: {
-    fontSize: 17,
-    fontWeight: "800",
+    color: "#111827",
+    fontSize: 19,
+    fontWeight: "900",
   },
 
-  menu: {
+  smartHero: {
+    backgroundColor: "#111827",
+    borderRadius: 22,
+    padding: 22,
+  },
+
+  smartTitle: {
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontWeight: "900",
+  },
+
+  smartSub: {
+    color: "#C8CED8",
+    marginTop: 7,
+    lineHeight: 20,
+  },
+
+  insight: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 17,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#ECEFF4",
   },
 
-  menuTitle: {
-    fontSize: 16,
+  insightTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  insightText: {
+    color: "#626A75",
+    marginTop: 7,
+    lineHeight: 20,
+  },
+
+  profileBox: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 12,
+  },
+
+  inputWrap: {
+    marginBottom: 13,
+  },
+
+  inputLabel: {
+    fontSize: 12,
     fontWeight: "800",
+    color: "#555C67",
+    marginBottom: 6,
   },
 
-  menuSub: {
-    color: "#6B7280",
-    marginTop: 5,
+  input: {
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#DDE2E9",
+    paddingHorizontal: 13,
+    fontSize: 15,
+    backgroundColor: "#FAFBFC",
+    color: "#111827",
+  },
+
+  typeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginBottom: 15,
+    gap: 7,
+  },
+
+  typeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: "#F0F2F5",
+  },
+
+  typeSelected: {
+    backgroundColor: "#DDE3ED",
+    borderWidth: 1,
+    borderColor: "#111827",
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end",
+  },
+
+  modalBox: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 25,
+    borderTopRightRadius: 25,
+    maxHeight: "92%",
+    padding: 20,
+  },
+
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    marginBottom: 18,
   },
 
   bottom: {
     position: "absolute",
+    bottom: 0,
     left: 0,
     right: 0,
-    bottom: 0,
     height: 72,
     backgroundColor: "#FFFFFF",
     borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
+    borderTopColor: "#E7EAF0",
     flexDirection: "row",
     justifyContent: "space-around",
     alignItems: "center",
+    paddingBottom: 4,
   },
 
   navItem: {
     alignItems: "center",
     justifyContent: "center",
-    flex: 1,
+    minWidth: 58,
   },
 
   navIcon: {
-    fontSize: 21,
+    fontSize: 19,
+    color: "#8A919C",
   },
 
   navText: {
     fontSize: 10,
-    color: "#6B7280",
+    color: "#8A919C",
     marginTop: 3,
+    fontWeight: "700",
   },
 
-  navSelected: {
+  navActive: {
     color: "#111827",
-    fontWeight: "800",
-  },
-
-  modal: {
-    flex: 1,
-    backgroundColor: "#F5F7FA",
-    padding: 18,
-  },
-
-  segment: {
-    flexDirection: "row",
-    marginBottom: 15,
-    gap: 8,
-  },
-
-  segmentButton: {
-    flex: 1,
-    padding: 13,
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-  },
-
-  segmentActive: {
-    backgroundColor: "#E5E7EB",
-  },
-
-  wrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 15,
-  },
-
-  typeButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
-  },
-
-  typeActive: {
-    backgroundColor: "#D1FAE5",
-  },
-
-  empty: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 15,
-    padding: 25,
-    alignItems: "center",
-    marginBottom: 10,
+    fontWeight: "900",
   },
 });
-
-export default App;

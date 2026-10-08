@@ -81,7 +81,9 @@ function normalizeData(x) {
     transactions: Array.isArray(x?.transactions)
       ? x.transactions
       : [],
-    expenses: Array.isArray(x?.expenses) ? x.expenses : [],
+    expenses: Array.isArray(x?.expenses)
+      ? x.expenses
+      : [],
   };
 }
 
@@ -115,18 +117,23 @@ export default function App() {
         ]);
 
       let loaded = null;
+      let backupData = null;
 
       try {
-        if (primary) loaded = normalizeData(JSON.parse(primary));
-      } catch {}
-
-      let backupData = null;
+        if (primary) {
+          loaded = normalizeData(JSON.parse(primary));
+        }
+      } catch (e) {
+        console.log("Primary data error:", e);
+      }
 
       try {
         if (backup) {
           backupData = normalizeData(JSON.parse(backup));
         }
-      } catch {}
+      } catch (e) {
+        console.log("Backup data error:", e);
+      }
 
       const primaryHasData =
         loaded &&
@@ -161,8 +168,10 @@ export default function App() {
     const json = JSON.stringify(next);
 
     try {
-      await AsyncStorage.setItem(DATA_KEY, json);
-      await AsyncStorage.setItem(BACKUP_KEY, json);
+      await AsyncStorage.multiSet([
+        [DATA_KEY, json],
+        [BACKUP_KEY, json],
+      ]);
     } catch (e) {
       console.log("Save error:", e);
     }
@@ -182,14 +191,17 @@ export default function App() {
   function balance(party) {
     let b = num(party.openingBalance);
 
-    if (party.balanceType === "advance") b = -b;
+    if (party.balanceType === "advance") {
+      b = -b;
+    }
 
     data.transactions.forEach((t) => {
       if (
         t.partyId !== party.id ||
         t.partyType !== party.type
-      )
+      ) {
         return;
+      }
 
       if (party.type === "customer") {
         if (t.type === "sale") b += num(t.amount);
@@ -209,22 +221,28 @@ export default function App() {
 
   const customers = useMemo(() => {
     const q = search.toLowerCase().trim();
+
     if (!q) return data.customers;
 
     return data.customers.filter(
       (x) =>
-        String(x.name || "").toLowerCase().includes(q) ||
+        String(x.name || "")
+          .toLowerCase()
+          .includes(q) ||
         String(x.phone || "").includes(q)
     );
   }, [data.customers, search]);
 
   const suppliers = useMemo(() => {
     const q = search.toLowerCase().trim();
+
     if (!q) return data.suppliers;
 
     return data.suppliers.filter(
       (x) =>
-        String(x.name || "").toLowerCase().includes(q) ||
+        String(x.name || "")
+          .toLowerCase()
+          .includes(q) ||
         String(x.phone || "").includes(q)
     );
   }, [data.suppliers, search]);
@@ -233,7 +251,10 @@ export default function App() {
     (s, p) =>
       s +
       Math.max(
-        balance({ ...p, type: "customer" }),
+        balance({
+          ...p,
+          type: "customer",
+        }),
         0
       ),
     0
@@ -243,7 +264,10 @@ export default function App() {
     (s, p) =>
       s +
       Math.max(
-        balance({ ...p, type: "supplier" }),
+        balance({
+          ...p,
+          type: "supplier",
+        }),
         0
       ),
     0
@@ -270,10 +294,19 @@ export default function App() {
     0
   );
 
+  /*
+   * -------------------------------------------------------
+   * PARTY
+   * -------------------------------------------------------
+   */
+
   function openParty(type, party = null) {
     setForm(
       party
-        ? { ...party, type }
+        ? {
+            ...party,
+            type,
+          }
         : {
             name: "",
             phone: "",
@@ -293,10 +326,30 @@ export default function App() {
         ? "customer"
         : "supplier"
     );
+
+    /*
+     * NEW:
+     * New Customer/Supplier open karte hi
+     * native phone Contacts picker automatically open.
+     *
+     * Existing party edit karte waqt picker nahi khulega.
+     */
+    if (!party) {
+      setTimeout(() => {
+        pickContact();
+      }, 450);
+    }
   }
 
-  // NEW: Android Contacts Picker
+  /*
+   * -------------------------------------------------------
+   * CONTACT PICKER
+   * -------------------------------------------------------
+   */
+
   async function pickContact() {
+    if (contactLoading) return;
+
     try {
       setContactLoading(true);
 
@@ -306,7 +359,7 @@ export default function App() {
       if (permission.status !== "granted") {
         Alert.alert(
           "Contacts Permission",
-          "Customer/Supplier ka data automatically lene ke liye Contacts permission allow karein."
+          "Contacts permission allow karein. Aap baad mein manually details bhi enter kar sakte hain."
         );
         return;
       }
@@ -314,9 +367,15 @@ export default function App() {
       const result =
         await Contacts.presentContactPickerAsync();
 
-      if (!result || !result.contact) return;
+      if (!result) return;
 
-      const contact = result.contact;
+      /*
+       * Expo Contacts versions mein result direct Contact
+       * ya { contact: Contact } dono ho sakte hain.
+       */
+      const contact = result.contact || result;
+
+      if (!contact) return;
 
       const phone =
         contact.phoneNumbers?.[0]?.number || "";
@@ -336,22 +395,34 @@ export default function App() {
               .join(", ")
           : "";
 
+      const fullName = [
+        contact.firstName,
+        contact.middleName,
+        contact.lastName,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+
+      const name =
+        contact.name ||
+        fullName ||
+        contact.firstName ||
+        "";
+
       setForm((old) => ({
         ...old,
-        name:
-          contact.name ||
-          contact.firstName ||
-          old.name ||
-          "",
-        phone,
-        email,
-        address,
+        name: name || old.name || "",
+        phone: phone || old.phone || "",
+        email: email || old.email || "",
+        address: address || old.address || "",
       }));
     } catch (e) {
       console.log("Contact picker error:", e);
+
       Alert.alert(
         "Contacts",
-        "Contact select nahi ho saka."
+        "Contact select nahi ho saka. Aap details manually enter kar sakte hain."
       );
     } finally {
       setContactLoading(false);
@@ -360,13 +431,18 @@ export default function App() {
 
   function saveParty() {
     if (!String(form.name || "").trim()) {
-      Alert.alert("Required", "Name enter karein.");
+      Alert.alert(
+        "Required",
+        "Name enter karein."
+      );
       return;
     }
 
     const type =
       form.type ||
-      (modal === "supplier" ? "supplier" : "customer");
+      (modal === "supplier"
+        ? "supplier"
+        : "customer");
 
     const party = {
       id: form.id || uid(type),
@@ -406,7 +482,11 @@ export default function App() {
 
     Alert.alert(
       "Saved",
-      `${type === "customer" ? "Customer" : "Supplier"} saved successfully.`
+      `${
+        type === "customer"
+          ? "Customer"
+          : "Supplier"
+      } saved successfully.`
     );
   }
 
@@ -415,7 +495,10 @@ export default function App() {
       "Delete",
       `Delete ${party.name}?`,
       [
-        { text: "Cancel", style: "cancel" },
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
         {
           text: "Delete",
           style: "destructive",
@@ -430,13 +513,14 @@ export default function App() {
               [key]: old[key].filter(
                 (x) => x.id !== party.id
               ),
-              transactions: old.transactions.filter(
-                (x) =>
-                  !(
-                    x.partyId === party.id &&
-                    x.partyType === party.type
-                  )
-              ),
+              transactions:
+                old.transactions.filter(
+                  (x) =>
+                    !(
+                      x.partyId === party.id &&
+                      x.partyType === party.type
+                    )
+                ),
             }));
 
             setSelected(null);
@@ -448,9 +532,19 @@ export default function App() {
   }
 
   function openPartyDetails(party, type) {
-    setSelected({ ...party, type });
+    setSelected({
+      ...party,
+      type,
+    });
+
     setPage("party");
   }
+
+  /*
+   * -------------------------------------------------------
+   * PAYMENTS
+   * -------------------------------------------------------
+   */
 
   function openPayment(type, party) {
     setSelected({
@@ -473,7 +567,10 @@ export default function App() {
     const amount = num(form.amount);
 
     if (!amount || amount <= 0) {
-      Alert.alert("Amount", "Valid amount enter karein.");
+      Alert.alert(
+        "Amount",
+        "Valid amount enter karein."
+      );
       return;
     }
 
@@ -486,7 +583,8 @@ export default function App() {
       partyName: selected.name,
       type: modal,
       amount,
-      paymentMode: form.paymentMode || "Cash",
+      paymentMode:
+        form.paymentMode || "Cash",
       reference: inputValue(form.reference),
       note: inputValue(form.note),
       date: form.date || today(),
@@ -509,6 +607,12 @@ export default function App() {
     );
   }
 
+  /*
+   * -------------------------------------------------------
+   * SALE / PURCHASE
+   * -------------------------------------------------------
+   */
+
   function openSalePurchase(type) {
     if (!selected) return;
 
@@ -527,7 +631,10 @@ export default function App() {
     const amount = num(form.amount);
 
     if (!amount || amount <= 0) {
-      Alert.alert("Amount", "Valid amount enter karein.");
+      Alert.alert(
+        "Amount",
+        "Valid amount enter karein."
+      );
       return;
     }
 
@@ -540,7 +647,8 @@ export default function App() {
       partyName: selected.name,
       type: modal,
       amount,
-      paymentMode: form.paymentMode || "Credit",
+      paymentMode:
+        form.paymentMode || "Credit",
       reference: inputValue(form.reference),
       note: inputValue(form.note),
       date: form.date || today(),
@@ -563,6 +671,12 @@ export default function App() {
     );
   }
 
+  /*
+   * -------------------------------------------------------
+   * EXPENSE
+   * -------------------------------------------------------
+   */
+
   function openExpense() {
     setForm({
       title: "",
@@ -579,12 +693,18 @@ export default function App() {
     const amount = num(form.amount);
 
     if (!String(form.title || "").trim()) {
-      Alert.alert("Required", "Expense name enter karein.");
+      Alert.alert(
+        "Required",
+        "Expense name enter karein."
+      );
       return;
     }
 
     if (!amount || amount <= 0) {
-      Alert.alert("Amount", "Valid amount enter karein.");
+      Alert.alert(
+        "Amount",
+        "Valid amount enter karein."
+      );
       return;
     }
 
@@ -593,14 +713,18 @@ export default function App() {
       title: String(form.title).trim(),
       amount,
       note: inputValue(form.note),
-      paymentMode: form.paymentMode || "Cash",
+      paymentMode:
+        form.paymentMode || "Cash",
       date: form.date || today(),
       createdAt: Date.now(),
     };
 
     updateData((old) => ({
       ...old,
-      expenses: [expense, ...old.expenses],
+      expenses: [
+        expense,
+        ...old.expenses,
+      ],
     }));
 
     setModal("");
@@ -611,8 +735,17 @@ export default function App() {
     );
   }
 
+  /*
+   * -------------------------------------------------------
+   * BUSINESS
+   * -------------------------------------------------------
+   */
+
   function openBusiness() {
-    setForm({ ...data.business });
+    setForm({
+      ...data.business,
+    });
+
     setModal("business");
   }
 
@@ -632,21 +765,32 @@ export default function App() {
     setModal("");
   }
 
+  /*
+   * -------------------------------------------------------
+   * CALL / WHATSAPP
+   * -------------------------------------------------------
+   */
+
   async function callParty() {
     if (!selected?.phone) {
-      Alert.alert("Phone", "Phone number available nahi hai.");
+      Alert.alert(
+        "Phone",
+        "Phone number available nahi hai."
+      );
       return;
     }
 
-    const phone = String(selected.phone).replace(
-      /[^0-9+]/g,
-      ""
-    );
+    const phone = String(
+      selected.phone
+    ).replace(/[^0-9+]/g, "");
 
     try {
       await Linking.openURL(`tel:${phone}`);
     } catch {
-      Alert.alert("Error", "Phone app open nahi ho saka.");
+      Alert.alert(
+        "Error",
+        "Phone app open nahi ho saka."
+      );
     }
   }
 
@@ -659,22 +803,24 @@ export default function App() {
       return;
     }
 
-    const balanceAmount = balance(selected);
+    const balanceAmount =
+      balance(selected);
 
     const message =
       `Namaste ${selected.name},\n\n` +
       `${data.business.name}\n` +
       `Your current balance: ${money(
         Math.abs(balanceAmount)
-      )}\n\nThank you.`;
+      )}\n\n` +
+      `Thank you.`;
 
-    let phone = String(selected.phone).replace(
-      /[^0-9]/g,
-      ""
-    );
+    let phone = String(
+      selected.phone
+    ).replace(/[^0-9]/g, "");
 
-    // Indian numbers
-    if (phone.length === 10) phone = "91" + phone;
+    if (phone.length === 10) {
+      phone = "91" + phone;
+    }
 
     const url =
       `https://wa.me/${phone}?text=` +
@@ -690,13 +836,23 @@ export default function App() {
     }
   }
 
+  /*
+   * -------------------------------------------------------
+   * PIN
+   * -------------------------------------------------------
+   */
+
   function setPinForApp() {
-    setForm({ newPin: "" });
+    setForm({
+      newPin: "",
+    });
+
     setModal("setPin");
   }
 
   async function savePin() {
-    const newPin = String(form.newPin || "").trim();
+    const newPin =
+      String(form.newPin || "").trim();
 
     if (!/^\d{4,6}$/.test(newPin)) {
       Alert.alert(
@@ -707,15 +863,25 @@ export default function App() {
     }
 
     try {
-      await AsyncStorage.setItem(PIN_KEY, newPin);
+      await AsyncStorage.setItem(
+        PIN_KEY,
+        newPin
+      );
+
       setSavedPin(newPin);
       setLocked(false);
       setPin("");
       setModal("");
 
-      Alert.alert("PIN Saved", "App PIN successfully set.");
+      Alert.alert(
+        "PIN Saved",
+        "App PIN successfully set."
+      );
     } catch {
-      Alert.alert("Error", "PIN save nahi ho saka.");
+      Alert.alert(
+        "Error",
+        "PIN save nahi ho saka."
+      );
     }
   }
 
@@ -724,7 +890,10 @@ export default function App() {
       setLocked(false);
       setPin("");
     } else {
-      Alert.alert("Wrong PIN", "PIN incorrect hai.");
+      Alert.alert(
+        "Wrong PIN",
+        "PIN incorrect hai."
+      );
     }
   }
 
@@ -733,12 +902,18 @@ export default function App() {
       "Remove PIN",
       "App PIN remove karna hai?",
       [
-        { text: "Cancel", style: "cancel" },
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
         {
           text: "Remove",
           style: "destructive",
           onPress: async () => {
-            await AsyncStorage.removeItem(PIN_KEY);
+            await AsyncStorage.removeItem(
+              PIN_KEY
+            );
+
             setSavedPin("");
             setLocked(false);
           },
@@ -747,20 +922,33 @@ export default function App() {
     );
   }
 
+  /*
+   * -------------------------------------------------------
+   * HOME
+   * -------------------------------------------------------
+   */
+
   function renderHome() {
     const list =
-      tab === "customers" ? customers : suppliers;
+      tab === "customers"
+        ? customers
+        : suppliers;
 
     return (
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.header}>
+        <View style={styles.hero}>
           <View style={{ flex: 1 }}>
+            <Text style={styles.greeting}>
+              Business Dashboard
+            </Text>
+
             <Text style={styles.brand}>
               {data.business.name}
             </Text>
+
             <Text style={styles.subBrand}>
               Smart Business Ledger
             </Text>
@@ -770,8 +958,42 @@ export default function App() {
             style={styles.settingsButton}
             onPress={openBusiness}
           >
-            <Text style={styles.settingsText}>⚙️</Text>
+            <Text style={styles.settingsText}>
+              ⚙️
+            </Text>
           </TouchableOpacity>
+        </View>
+
+        <View style={styles.overviewCard}>
+          <Text style={styles.overviewTitle}>
+            Today's Overview
+          </Text>
+
+          <Text style={styles.overviewSub}>
+            Manage your business money in one place
+          </Text>
+
+          <View style={styles.overviewRow}>
+            <View>
+              <Text style={styles.overviewLabel}>
+                Received
+              </Text>
+
+              <Text style={styles.overviewGreen}>
+                {money(received)}
+              </Text>
+            </View>
+
+            <View>
+              <Text style={styles.overviewLabel}>
+                Given
+              </Text>
+
+              <Text style={styles.overviewRed}>
+                {money(given)}
+              </Text>
+            </View>
+          </View>
         </View>
 
         <View style={styles.summaryGrid}>
@@ -779,40 +1001,63 @@ export default function App() {
             title="Receivable"
             value={money(receivable)}
             type="red"
+            icon="↓"
           />
+
           <Summary
             title="Payable"
             value={money(payable)}
             type="orange"
+            icon="↑"
           />
+
           <Summary
             title="Sales"
             value={money(sales)}
             type="green"
+            icon="₹"
           />
+
           <Summary
             title="Purchases"
             value={money(purchases)}
             type="blue"
+            icon="🛒"
           />
         </View>
+
+        <Text style={styles.quickTitle}>
+          Quick Actions
+        </Text>
 
         <View style={styles.actionRow}>
           <TouchableOpacity
             style={styles.primaryButton}
-            onPress={() => openParty("customer")}
+            onPress={() =>
+              openParty("customer")
+            }
           >
+            <Text style={styles.actionIcon}>
+              👤
+            </Text>
+
             <Text style={styles.primaryButtonText}>
-              ＋ Customer
+              Customer
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.secondaryButton}
-            onPress={() => openParty("supplier")}
+            onPress={() =>
+              openParty("supplier")
+            }
           >
+            <Text style={styles.actionIcon}>
+              🏪
+            </Text>
+
             <Text style={styles.secondaryButtonText}>
-              ＋ Supplier
+              Supplier
             </Text>
           </TouchableOpacity>
         </View>
@@ -821,46 +1066,100 @@ export default function App() {
           style={styles.expenseButton}
           onPress={openExpense}
         >
-          <Text style={styles.expenseButtonText}>
-            ＋ Add Expense
+          <Text style={styles.expenseIcon}>
+            💸
+          </Text>
+
+          <View style={{ flex: 1 }}>
+            <Text style={styles.expenseButtonText}>
+              Add Expense
+            </Text>
+
+            <Text style={styles.expenseSub}>
+              Record business expense
+            </Text>
+          </View>
+
+          <Text style={styles.arrow}>
+            ›
           </Text>
         </TouchableOpacity>
 
-        <Text style={styles.sectionTitle}>
-          Parties
-        </Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>
+            Parties
+          </Text>
+
+          <Text style={styles.countText}>
+            {tab === "customers"
+              ? data.customers.length
+              : data.suppliers.length}{" "}
+            total
+          </Text>
+        </View>
 
         <View style={styles.tabs}>
           <TouchableOpacity
             style={[
               styles.tab,
-              tab === "customers" && styles.activeTab,
+              tab === "customers" &&
+                styles.activeTab,
             ]}
-            onPress={() => setTab("customers")}
+            onPress={() =>
+              setTab("customers")
+            }
           >
-            <Text style={styles.tabText}>
-              Customers ({data.customers.length})
+            <Text
+              style={[
+                styles.tabText,
+                tab === "customers" &&
+                  styles.activeTabText,
+              ]}
+            >
+              Customers
             </Text>
+
+            <View style={styles.tabBadge}>
+              <Text style={styles.tabBadgeText}>
+                {data.customers.length}
+              </Text>
+            </View>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[
               styles.tab,
-              tab === "suppliers" && styles.activeTab,
+              tab === "suppliers" &&
+                styles.activeTab,
             ]}
-            onPress={() => setTab("suppliers")}
+            onPress={() =>
+              setTab("suppliers")
+            }
           >
-            <Text style={styles.tabText}>
-              Suppliers ({data.suppliers.length})
+            <Text
+              style={[
+                styles.tabText,
+                tab === "suppliers" &&
+                  styles.activeTabText,
+              ]}
+            >
+              Suppliers
             </Text>
+
+            <View style={styles.tabBadge}>
+              <Text style={styles.tabBadgeText}>
+                {data.suppliers.length}
+              </Text>
+            </View>
           </TouchableOpacity>
         </View>
 
         <TextInput
           style={styles.search}
-          placeholder="🔎  Search party or phone"
+          placeholder="🔎  Search name or phone"
           value={search}
           onChangeText={setSearch}
+          placeholderTextColor="#98A2B3"
         />
 
         {list.map((party) => {
@@ -879,8 +1178,12 @@ export default function App() {
               key={party.id}
               style={styles.partyCard}
               onPress={() =>
-                openPartyDetails(party, type)
+                openPartyDetails(
+                  party,
+                  type
+                )
               }
+              activeOpacity={0.8}
             >
               <View style={styles.avatar}>
                 <Text style={styles.avatarText}>
@@ -891,100 +1194,204 @@ export default function App() {
               </View>
 
               <View style={styles.partyInfo}>
-                <Text style={styles.partyName}>
+                <Text
+                  style={styles.partyName}
+                  numberOfLines={1}
+                >
                   {party.name}
                 </Text>
+
                 <Text style={styles.partyPhone}>
-                  {party.phone || "No phone"}
+                  {party.phone ||
+                    "No phone number"}
                 </Text>
               </View>
 
-              <Text
-                style={[
-                  styles.partyBalance,
-                  b > 0
-                    ? styles.red
+              <View style={styles.balanceBox}>
+                <Text
+                  style={[
+                    styles.balanceStatus,
+                    b > 0
+                      ? styles.red
+                      : b < 0
+                      ? styles.green
+                      : styles.gray,
+                  ]}
+                >
+                  {b > 0
+                    ? "Due"
                     : b < 0
-                    ? styles.green
-                    : styles.gray,
-                ]}
-              >
-                {money(Math.abs(b))}
-              </Text>
+                    ? "Advance"
+                    : "Clear"}
+                </Text>
+
+                <Text
+                  style={[
+                    styles.partyBalance,
+                    b > 0
+                      ? styles.red
+                      : b < 0
+                      ? styles.green
+                      : styles.gray,
+                  ]}
+                >
+                  {money(Math.abs(b))}
+                </Text>
+              </View>
             </TouchableOpacity>
           );
         })}
 
         {list.length === 0 && (
           <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>👥</Text>
+            <View style={styles.emptyCircle}>
+              <Text style={styles.emptyIcon}>
+                👥
+              </Text>
+            </View>
+
             <Text style={styles.emptyTitle}>
               No {tab} yet
             </Text>
+
             <Text style={styles.emptyText}>
-              Add a party from your phone contacts.
+              Add a party from your phone contacts
+              and start maintaining the ledger.
             </Text>
+
+            <TouchableOpacity
+              style={styles.emptyButton}
+              onPress={() =>
+                openParty(
+                  tab === "customers"
+                    ? "customer"
+                    : "supplier"
+                )
+              }
+            >
+              <Text style={styles.emptyButtonText}>
+                + Add{" "}
+                {tab === "customers"
+                  ? "Customer"
+                  : "Supplier"}
+              </Text>
+            </TouchableOpacity>
           </View>
         )}
 
         <View style={styles.statsCard}>
-          <Text style={styles.statsTitle}>
-            Cash Summary
-          </Text>
+          <View style={styles.statsHeader}>
+            <Text style={styles.statsTitle}>
+              Cash Summary
+            </Text>
+
+            <Text style={styles.statsIcon}>
+              💰
+            </Text>
+          </View>
 
           <StatRow
             title="Received"
             value={money(received)}
             positive
           />
+
           <StatRow
             title="Given"
             value={money(given)}
           />
+
           <StatRow
             title="Expenses"
             value={money(expenses)}
           />
         </View>
 
-        <Text style={styles.sectionTitle}>
-          Recent Transactions
-        </Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>
+            Recent Transactions
+          </Text>
 
-        {data.transactions.slice(0, 10).map((t) => (
-          <View
-            key={t.id}
-            style={styles.transactionCard}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.transactionName}>
-                {t.partyName}
-              </Text>
+          <Text style={styles.countText}>
+            Latest 10
+          </Text>
+        </View>
 
-              <Text style={styles.transactionType}>
-                {titleFor(t.type)}
-              </Text>
+        {data.transactions
+          .slice(0, 10)
+          .map((t) => (
+            <View
+              key={t.id}
+              style={styles.transactionCard}
+            >
+              <View style={styles.txIcon}>
+                <Text>
+                  {t.type === "received"
+                    ? "↓"
+                    : t.type === "given"
+                    ? "↑"
+                    : t.type === "sale"
+                    ? "🧾"
+                    : "🛒"}
+                </Text>
+              </View>
 
-              <Text style={styles.transactionDate}>
-                {t.date}
+              <View
+                style={{
+                  flex: 1,
+                  marginLeft: 11,
+                }}
+              >
+                <Text
+                  style={styles.transactionName}
+                  numberOfLines={1}
+                >
+                  {t.partyName}
+                </Text>
+
+                <Text style={styles.transactionType}>
+                  {titleFor(t.type)}
+                  {t.paymentMode
+                    ? ` • ${t.paymentMode}`
+                    : ""}
+                </Text>
+
+                <Text style={styles.transactionDate}>
+                  {t.date}
+                </Text>
+              </View>
+
+              <Text
+                style={[
+                  styles.transactionAmount,
+                  t.type === "received"
+                    ? styles.greenText
+                    : t.type === "sale"
+                    ? styles.blueText
+                    : styles.redText,
+                ]}
+              >
+                {money(t.amount)}
               </Text>
             </View>
+          ))}
 
-            <Text
-              style={[
-                styles.transactionAmount,
-                t.type === "received"
-                  ? styles.greenText
-                  : styles.redText,
-              ]}
-            >
-              {money(t.amount)}
+        {data.transactions.length === 0 && (
+          <View style={styles.smallEmpty}>
+            <Text style={styles.emptyText}>
+              No transactions yet.
             </Text>
           </View>
-        ))}
+        )}
       </ScrollView>
     );
   }
+
+  /*
+   * -------------------------------------------------------
+   * PARTY DETAILS
+   * -------------------------------------------------------
+   */
 
   function renderParty() {
     if (!selected) return null;
@@ -1010,7 +1417,9 @@ export default function App() {
             setSelected(null);
           }}
         >
-          <Text style={styles.backText}>← Back</Text>
+          <Text style={styles.backText}>
+            ← Back to Parties
+          </Text>
         </TouchableOpacity>
 
         <View style={styles.profileCard}>
@@ -1027,18 +1436,19 @@ export default function App() {
           </Text>
 
           <Text style={styles.profilePhone}>
-            {selected.phone || "No phone"}
+            {selected.phone ||
+              "No phone number"}
           </Text>
 
           {selected.email ? (
             <Text style={styles.profileDetail}>
-              {selected.email}
+              ✉ {selected.email}
             </Text>
           ) : null}
 
           {selected.address ? (
             <Text style={styles.profileDetail}>
-              {selected.address}
+              📍 {selected.address}
             </Text>
           ) : null}
 
@@ -1047,6 +1457,8 @@ export default function App() {
               GST: {selected.gst}
             </Text>
           ) : null}
+
+          <View style={styles.balanceDivider} />
 
           <Text style={styles.balanceCaption}>
             Current Balance
@@ -1064,28 +1476,57 @@ export default function App() {
           >
             {money(Math.abs(b))}
           </Text>
+
+          <Text
+            style={[
+              styles.balanceWord,
+              b > 0
+                ? styles.red
+                : b < 0
+                ? styles.green
+                : styles.gray,
+            ]}
+          >
+            {b > 0
+              ? "Amount Due"
+              : b < 0
+              ? "Advance"
+              : "Account Clear"}
+          </Text>
         </View>
 
         <View style={styles.actionGrid}>
           <TouchableOpacity
             style={styles.receiveButton}
             onPress={() =>
-              openPayment("received", selected)
+              openPayment(
+                "received",
+                selected
+              )
             }
           >
+            <Text style={styles.actionButtonIcon}>
+              ↓
+            </Text>
             <Text style={styles.actionButtonText}>
-              + Received
+              Received
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.giveButton}
             onPress={() =>
-              openPayment("given", selected)
+              openPayment(
+                "given",
+                selected
+              )
             }
           >
+            <Text style={styles.actionButtonIcon}>
+              ↑
+            </Text>
             <Text style={styles.actionButtonText}>
-              - Given
+              Given
             </Text>
           </TouchableOpacity>
 
@@ -1093,25 +1534,38 @@ export default function App() {
             style={styles.normalAction}
             onPress={() =>
               openSalePurchase(
-                selected.type === "customer"
+                selected.type ===
+                  "customer"
                   ? "sale"
                   : "purchase"
               )
             }
           >
+            <Text style={styles.normalActionIcon}>
+              🧾
+            </Text>
+
             <Text style={styles.normalActionText}>
-              {selected.type === "customer"
-                ? "+ Sale"
-                : "+ Purchase"}
+              {selected.type ===
+              "customer"
+                ? "Sale"
+                : "Purchase"}
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.normalAction}
             onPress={() =>
-              openParty(selected.type, selected)
+              openParty(
+                selected.type,
+                selected
+              )
             }
           >
+            <Text style={styles.normalActionIcon}>
+              ✏️
+            </Text>
+
             <Text style={styles.normalActionText}>
               Edit
             </Text>
@@ -1138,15 +1592,6 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => deleteParty(selected)}
-        >
-          <Text style={styles.deleteText}>
-            Delete Party
-          </Text>
-        </TouchableOpacity>
-
         <Text style={styles.sectionTitle}>
           Ledger
         </Text>
@@ -1156,16 +1601,41 @@ export default function App() {
             key={t.id}
             style={styles.transactionCard}
           >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.transactionName}>
+            <View style={styles.txIcon}>
+              <Text>
+                {t.type === "received"
+                  ? "↓"
+                  : t.type === "given"
+                  ? "↑"
+                  : t.type === "sale"
+                  ? "🧾"
+                  : "🛒"}
+              </Text>
+            </View>
+
+            <View
+              style={{
+                flex: 1,
+                marginLeft: 11,
+              }}
+            >
+              <Text
+                style={styles.transactionName}
+              >
                 {titleFor(t.type)}
               </Text>
 
-              <Text style={styles.transactionType}>
-                {t.note || t.paymentMode}
+              <Text
+                style={styles.transactionType}
+              >
+                {t.note ||
+                  t.paymentMode ||
+                  "Transaction"}
               </Text>
 
-              <Text style={styles.transactionDate}>
+              <Text
+                style={styles.transactionDate}
+              >
                 {t.date}
                 {t.reference
                   ? ` • Ref: ${t.reference}`
@@ -1173,7 +1643,14 @@ export default function App() {
               </Text>
             </View>
 
-            <Text style={styles.transactionAmount}>
+            <Text
+              style={[
+                styles.transactionAmount,
+                t.type === "received"
+                  ? styles.greenText
+                  : styles.redText,
+              ]}
+            >
               {money(t.amount)}
             </Text>
           </View>
@@ -1181,15 +1658,39 @@ export default function App() {
 
         {transactions.length === 0 && (
           <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>📒</Text>
+            <Text style={styles.emptyIcon}>
+              📒
+            </Text>
+
             <Text style={styles.emptyTitle}>
               No transactions
             </Text>
+
+            <Text style={styles.emptyText}>
+              Payment, sale or purchase add karein.
+            </Text>
           </View>
         )}
+
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={() =>
+            deleteParty(selected)
+          }
+        >
+          <Text style={styles.deleteText}>
+            Delete Party
+          </Text>
+        </TouchableOpacity>
       </ScrollView>
     );
   }
+
+  /*
+   * -------------------------------------------------------
+   * MODALS
+   * -------------------------------------------------------
+   */
 
   function renderModal() {
     if (!modal) return null;
@@ -1204,7 +1705,9 @@ export default function App() {
         visible
         transparent
         animationType="slide"
-        onRequestClose={() => setModal("")}
+        onRequestClose={() =>
+          setModal("")
+        }
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
@@ -1222,32 +1725,46 @@ export default function App() {
               }}
             >
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>
-                  {modal === "customer"
-                    ? "Add Customer"
-                    : modal === "supplier"
-                    ? "Add Supplier"
-                    : modal === "editParty"
-                    ? "Edit Party"
-                    : modal === "received"
-                    ? "Payment Received"
-                    : modal === "given"
-                    ? "Payment Given"
-                    : modal === "sale"
-                    ? "Credit / Sale"
-                    : modal === "purchase"
-                    ? "Purchase"
-                    : modal === "expense"
-                    ? "Add Expense"
-                    : modal === "business"
-                    ? "Business Profile"
-                    : "Set App PIN"}
-                </Text>
+                <View>
+                  <Text style={styles.modalTitle}>
+                    {modal === "customer"
+                      ? "Add Customer"
+                      : modal === "supplier"
+                      ? "Add Supplier"
+                      : modal === "editParty"
+                      ? "Edit Party"
+                      : modal === "received"
+                      ? "Payment Received"
+                      : modal === "given"
+                      ? "Payment Given"
+                      : modal === "sale"
+                      ? "Credit / Sale"
+                      : modal === "purchase"
+                      ? "Purchase"
+                      : modal === "expense"
+                      ? "Add Expense"
+                      : modal === "business"
+                      ? "Business Profile"
+                      : "Set App PIN"}
+                  </Text>
+
+                  {partyModal &&
+                  !form.id ? (
+                    <Text style={styles.modalSub}>
+                      Contact se details automatically fill karein
+                    </Text>
+                  ) : null}
+                </View>
 
                 <TouchableOpacity
-                  onPress={() => setModal("")}
+                  onPress={() =>
+                    setModal("")
+                  }
+                  style={styles.closeButton}
                 >
-                  <Text style={styles.closeText}>✕</Text>
+                  <Text style={styles.closeText}>
+                    ✕
+                  </Text>
                 </TouchableOpacity>
               </View>
 
@@ -1255,25 +1772,57 @@ export default function App() {
                 <>
                   {!form.id && (
                     <TouchableOpacity
-                      style={styles.contactPickerButton}
+                      style={
+                        styles.contactPickerButton
+                      }
                       onPress={pickContact}
-                      disabled={contactLoading}
+                      disabled={
+                        contactLoading
+                      }
                     >
                       {contactLoading ? (
                         <ActivityIndicator color="#fff" />
                       ) : (
                         <>
-                          <Text style={styles.contactPickerIcon}>
-                            👤
-                          </Text>
-                          <View>
-                            <Text style={styles.contactPickerTitle}>
-                              Choose from Contacts
-                            </Text>
-                            <Text style={styles.contactPickerSub}>
-                              Name & phone automatically fill honge
+                          <View
+                            style={
+                              styles.contactPickerCircle
+                            }
+                          >
+                            <Text>
+                              📱
                             </Text>
                           </View>
+
+                          <View
+                            style={{
+                              flex: 1,
+                            }}
+                          >
+                            <Text
+                              style={
+                                styles.contactPickerTitle
+                              }
+                            >
+                              Choose from Contacts
+                            </Text>
+
+                            <Text
+                              style={
+                                styles.contactPickerSub
+                              }
+                            >
+                              Name, phone & address auto-fill
+                            </Text>
+                          </View>
+
+                          <Text
+                            style={
+                              styles.contactPickerArrow
+                            }
+                          >
+                            ›
+                          </Text>
                         </>
                       )}
                     </TouchableOpacity>
@@ -1283,7 +1832,10 @@ export default function App() {
                     label="Name"
                     value={form.name}
                     onChangeText={(v) =>
-                      setForm({ ...form, name: v })
+                      setForm({
+                        ...form,
+                        name: v,
+                      })
                     }
                     placeholder="Party name"
                   />
@@ -1292,7 +1844,10 @@ export default function App() {
                     label="Phone"
                     value={form.phone}
                     onChangeText={(v) =>
-                      setForm({ ...form, phone: v })
+                      setForm({
+                        ...form,
+                        phone: v,
+                      })
                     }
                     placeholder="Phone number"
                     keyboardType="phone-pad"
@@ -1302,7 +1857,10 @@ export default function App() {
                     label="Email"
                     value={form.email}
                     onChangeText={(v) =>
-                      setForm({ ...form, email: v })
+                      setForm({
+                        ...form,
+                        email: v,
+                      })
                     }
                     placeholder="Email"
                     keyboardType="email-address"
@@ -1312,7 +1870,10 @@ export default function App() {
                     label="Address"
                     value={form.address}
                     onChangeText={(v) =>
-                      setForm({ ...form, address: v })
+                      setForm({
+                        ...form,
+                        address: v,
+                      })
                     }
                     placeholder="Address"
                   />
@@ -1321,7 +1882,10 @@ export default function App() {
                     label="GST"
                     value={form.gst}
                     onChangeText={(v) =>
-                      setForm({ ...form, gst: v })
+                      setForm({
+                        ...form,
+                        gst: v,
+                      })
                     }
                     placeholder="GST number"
                   />
@@ -1345,11 +1909,14 @@ export default function App() {
                     Balance Type
                   </Text>
 
-                  <View style={styles.choiceRow}>
+                  <View
+                    style={styles.choiceRow}
+                  >
                     <Choice
                       title="Due"
                       active={
-                        form.balanceType !== "advance"
+                        form.balanceType !==
+                        "advance"
                       }
                       onPress={() =>
                         setForm({
@@ -1362,12 +1929,14 @@ export default function App() {
                     <Choice
                       title="Advance"
                       active={
-                        form.balanceType === "advance"
+                        form.balanceType ===
+                        "advance"
                       }
                       onPress={() =>
                         setForm({
                           ...form,
-                          balanceType: "advance",
+                          balanceType:
+                            "advance",
                         })
                       }
                     />
@@ -1389,7 +1958,9 @@ export default function App() {
                 <>
                   <Field
                     label="Amount"
-                    value={inputValue(form.amount)}
+                    value={inputValue(
+                      form.amount
+                    )}
                     onChangeText={(v) =>
                       setForm({
                         ...form,
@@ -1404,24 +1975,30 @@ export default function App() {
                     Payment Mode
                   </Text>
 
-                  <View style={styles.choiceRow}>
-                    {["Cash", "UPI", "Bank", "Cheque"].map(
-                      (x) => (
-                        <Choice
-                          key={x}
-                          title={x}
-                          active={
-                            form.paymentMode === x
-                          }
-                          onPress={() =>
-                            setForm({
-                              ...form,
-                              paymentMode: x,
-                            })
-                          }
-                        />
-                      )
-                    )}
+                  <View
+                    style={styles.choiceRow}
+                  >
+                    {[
+                      "Cash",
+                      "UPI",
+                      "Bank",
+                      "Cheque",
+                    ].map((x) => (
+                      <Choice
+                        key={x}
+                        title={x}
+                        active={
+                          form.paymentMode ===
+                          x
+                        }
+                        onPress={() =>
+                          setForm({
+                            ...form,
+                            paymentMode: x,
+                          })
+                        }
+                      />
+                    ))}
                   </View>
 
                   <Field
@@ -1472,7 +2049,9 @@ export default function App() {
                 <>
                   <Field
                     label="Amount"
-                    value={inputValue(form.amount)}
+                    value={inputValue(
+                      form.amount
+                    )}
                     onChangeText={(v) =>
                       setForm({
                         ...form,
@@ -1487,24 +2066,30 @@ export default function App() {
                     Mode
                   </Text>
 
-                  <View style={styles.choiceRow}>
-                    {["Credit", "Cash", "UPI", "Bank"].map(
-                      (x) => (
-                        <Choice
-                          key={x}
-                          title={x}
-                          active={
-                            form.paymentMode === x
-                          }
-                          onPress={() =>
-                            setForm({
-                              ...form,
-                              paymentMode: x,
-                            })
-                          }
-                        />
-                      )
-                    )}
+                  <View
+                    style={styles.choiceRow}
+                  >
+                    {[
+                      "Credit",
+                      "Cash",
+                      "UPI",
+                      "Bank",
+                    ].map((x) => (
+                      <Choice
+                        key={x}
+                        title={x}
+                        active={
+                          form.paymentMode ===
+                          x
+                        }
+                        onPress={() =>
+                          setForm({
+                            ...form,
+                            paymentMode: x,
+                          })
+                        }
+                      />
+                    ))}
                   </View>
 
                   <Field
@@ -1549,7 +2134,9 @@ export default function App() {
                         ? "Save Sale"
                         : "Save Purchase"
                     }
-                    onPress={saveSalePurchase}
+                    onPress={
+                      saveSalePurchase
+                    }
                   />
                 </>
               )}
@@ -1570,7 +2157,9 @@ export default function App() {
 
                   <Field
                     label="Amount"
-                    value={inputValue(form.amount)}
+                    value={inputValue(
+                      form.amount
+                    )}
                     onChangeText={(v) =>
                       setForm({
                         ...form,
@@ -1699,14 +2288,27 @@ export default function App() {
     );
   }
 
+  /*
+   * -------------------------------------------------------
+   * LOADING / LOCK
+   * -------------------------------------------------------
+   */
+
   if (!ready) {
     return (
       <SafeAreaView style={styles.loading}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator
+          size="large"
+          color="#167a46"
+        />
+
         <Text style={styles.loadingTitle}>
           Vyapar Khata
         </Text>
-        <Text>Loading your business data...</Text>
+
+        <Text style={styles.loadingText}>
+          Loading your business data...
+        </Text>
       </SafeAreaView>
     );
   }
@@ -1714,7 +2316,11 @@ export default function App() {
   if (locked) {
     return (
       <SafeAreaView style={styles.lockScreen}>
-        <Text style={styles.lockIcon}>🔐</Text>
+        <View style={styles.lockCircle}>
+          <Text style={styles.lockIcon}>
+            🔐
+          </Text>
+        </View>
 
         <Text style={styles.lockTitle}>
           Vyapar Khata
@@ -1732,6 +2338,7 @@ export default function App() {
           secureTextEntry
           maxLength={6}
           placeholder="PIN"
+          placeholderTextColor="#98A2B3"
         />
 
         <TouchableOpacity
@@ -1760,16 +2367,26 @@ export default function App() {
             setSelected(null);
           }}
         >
-          <Text style={styles.bottomIcon}>🏠</Text>
-          <Text style={styles.bottomText}>Home</Text>
+          <Text style={styles.bottomIcon}>
+            🏠
+          </Text>
+
+          <Text style={styles.bottomText}>
+            Home
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.bottomItem}
           onPress={setPinForApp}
         >
-          <Text style={styles.bottomIcon}>🔐</Text>
-          <Text style={styles.bottomText}>PIN</Text>
+          <Text style={styles.bottomIcon}>
+            🔐
+          </Text>
+
+          <Text style={styles.bottomText}>
+            PIN
+          </Text>
         </TouchableOpacity>
 
         {savedPin ? (
@@ -1777,7 +2394,10 @@ export default function App() {
             style={styles.bottomItem}
             onPress={removePin}
           >
-            <Text style={styles.bottomIcon}>🔓</Text>
+            <Text style={styles.bottomIcon}>
+              🔓
+            </Text>
+
             <Text style={styles.bottomText}>
               Remove PIN
             </Text>
@@ -1790,10 +2410,42 @@ export default function App() {
   );
 }
 
-function Summary({ title, value, type }) {
+/*
+ * -------------------------------------------------------
+ * COMPONENTS
+ * -------------------------------------------------------
+ */
+
+function Summary({
+  title,
+  value,
+  type,
+  icon,
+}) {
   return (
     <View style={styles.summaryCard}>
-      <Text style={styles.summaryLabel}>{title}</Text>
+      <View style={styles.summaryTop}>
+        <Text style={styles.summaryLabel}>
+          {title}
+        </Text>
+
+        <View
+          style={[
+            styles.summaryIcon,
+            type === "red" &&
+              styles.summaryIconRed,
+            type === "orange" &&
+              styles.summaryIconOrange,
+            type === "green" &&
+              styles.summaryIconGreen,
+            type === "blue" &&
+              styles.summaryIconBlue,
+          ]}
+        >
+          <Text>{icon}</Text>
+        </View>
+      </View>
+
       <Text
         style={[
           styles.summaryValue,
@@ -1809,10 +2461,17 @@ function Summary({ title, value, type }) {
   );
 }
 
-function StatRow({ title, value, positive }) {
+function StatRow({
+  title,
+  value,
+  positive,
+}) {
   return (
     <View style={styles.statRow}>
-      <Text>{title}</Text>
+      <Text style={styles.statTitle}>
+        {title}
+      </Text>
+
       <Text
         style={
           positive
@@ -1836,38 +2495,50 @@ function Field({
 }) {
   return (
     <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldLabel}>
+        {label}
+      </Text>
 
       <TextInput
         style={styles.input}
         value={
-          value === undefined || value === null
+          value === undefined ||
+          value === null
             ? ""
             : String(value)
         }
         onChangeText={onChangeText}
         placeholder={placeholder}
+        placeholderTextColor="#98A2B3"
         keyboardType={keyboardType}
-        secureTextEntry={secureTextEntry}
+        secureTextEntry={
+          secureTextEntry
+        }
         autoCapitalize="none"
       />
     </View>
   );
 }
 
-function Choice({ title, active, onPress }) {
+function Choice({
+  title,
+  active,
+  onPress,
+}) {
   return (
     <TouchableOpacity
       style={[
         styles.choice,
-        active && styles.choiceActive,
+        active &&
+          styles.choiceActive,
       ]}
       onPress={onPress}
     >
       <Text
         style={[
           styles.choiceText,
-          active && styles.choiceTextActive,
+          active &&
+            styles.choiceTextActive,
         ]}
       >
         {title}
@@ -1876,11 +2547,15 @@ function Choice({ title, active, onPress }) {
   );
 }
 
-function SaveButton({ title, onPress }) {
+function SaveButton({
+  title,
+  onPress,
+}) {
   return (
     <TouchableOpacity
       style={styles.saveButton}
       onPress={onPress}
+      activeOpacity={0.85}
     >
       <Text style={styles.saveButtonText}>
         {title}
@@ -1889,51 +2564,71 @@ function SaveButton({ title, onPress }) {
   );
 }
 
+/*
+ * -------------------------------------------------------
+ * STYLES
+ * -------------------------------------------------------
+ */
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f4f7fb",
+    backgroundColor: "#F4F7FB",
   },
 
   content: {
     padding: 16,
-    paddingBottom: 115,
+    paddingBottom: 120,
   },
 
   loading: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#f4f7fb",
+    backgroundColor: "#F4F7FB",
   },
 
   loadingTitle: {
-    fontSize: 25,
+    fontSize: 26,
     fontWeight: "900",
-    marginVertical: 10,
+    marginTop: 12,
   },
 
-  header: {
+  loadingText: {
+    color: "#718096",
+    marginTop: 4,
+  },
+
+  hero: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 18,
+    marginBottom: 17,
+  },
+
+  greeting: {
+    fontSize: 12,
+    color: "#167A46",
+    fontWeight: "800",
+    marginBottom: 3,
   },
 
   brand: {
     fontSize: 27,
     fontWeight: "900",
+    color: "#111827",
   },
 
   subBrand: {
     color: "#718096",
     marginTop: 3,
+    fontSize: 13,
   },
 
   settingsButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
-    backgroundColor: "#fff",
+    width: 48,
+    height: 48,
+    borderRadius: 15,
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
     elevation: 3,
@@ -1941,6 +2636,53 @@ const styles = StyleSheet.create({
 
   settingsText: {
     fontSize: 22,
+  },
+
+  overviewCard: {
+    backgroundColor: "#167A46",
+    borderRadius: 20,
+    padding: 19,
+    marginBottom: 14,
+    elevation: 4,
+  },
+
+  overviewTitle: {
+    color: "#FFFFFF",
+    fontSize: 19,
+    fontWeight: "900",
+  },
+
+  overviewSub: {
+    color: "#D7F2E2",
+    fontSize: 12,
+    marginTop: 4,
+  },
+
+  overviewRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 18,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.2)",
+  },
+
+  overviewLabel: {
+    color: "#D7F2E2",
+    fontSize: 12,
+    marginBottom: 4,
+  },
+
+  overviewGreen: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+
+  overviewRed: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "900",
   },
 
   summaryGrid: {
@@ -1951,31 +2693,61 @@ const styles = StyleSheet.create({
 
   summaryCard: {
     width: "48%",
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderRadius: 17,
-    padding: 16,
+    padding: 15,
     marginBottom: 12,
     elevation: 2,
+  },
+
+  summaryTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
 
   summaryLabel: {
     color: "#718096",
     fontSize: 12,
-    fontWeight: "700",
-    marginBottom: 7,
+    fontWeight: "800",
+  },
+
+  summaryIcon: {
+    width: 29,
+    height: 29,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  summaryIconRed: {
+    backgroundColor: "#FDECEC",
+  },
+
+  summaryIconOrange: {
+    backgroundColor: "#FFF2E4",
+  },
+
+  summaryIconGreen: {
+    backgroundColor: "#E8F6EE",
+  },
+
+  summaryIconBlue: {
+    backgroundColor: "#EAF0FF",
   },
 
   summaryValue: {
     fontSize: 18,
     fontWeight: "900",
+    marginTop: 10,
   },
 
   red: {
-    color: "#d32f2f",
+    color: "#D32F2F",
   },
 
   orange: {
-    color: "#e67e22",
+    color: "#E67E22",
   },
 
   green: {
@@ -1983,11 +2755,18 @@ const styles = StyleSheet.create({
   },
 
   blue: {
-    color: "#2463eb",
+    color: "#2463EB",
   },
 
   gray: {
-    color: "#777",
+    color: "#777777",
+  },
+
+  quickTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    marginTop: 5,
+    marginBottom: 10,
   },
 
   actionRow: {
@@ -1998,45 +2777,75 @@ const styles = StyleSheet.create({
 
   primaryButton: {
     flex: 1,
-    backgroundColor: "#167a46",
-    paddingVertical: 15,
-    borderRadius: 14,
+    backgroundColor: "#167A46",
+    paddingVertical: 14,
+    borderRadius: 15,
     alignItems: "center",
   },
 
   primaryButtonText: {
-    color: "#fff",
+    color: "#FFFFFF",
     fontWeight: "900",
-    fontSize: 15,
+    fontSize: 14,
   },
 
   secondaryButton: {
     flex: 1,
-    backgroundColor: "#fff",
-    paddingVertical: 15,
-    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    paddingVertical: 14,
+    borderRadius: 15,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e1e5ea",
+    borderColor: "#E1E5EA",
   },
 
   secondaryButtonText: {
+    color: "#1F2937",
     fontWeight: "900",
-    fontSize: 15,
+    fontSize: 14,
+  },
+
+  actionIcon: {
+    fontSize: 19,
+    marginBottom: 3,
   },
 
   expenseButton: {
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#e1e5ea",
-    paddingVertical: 14,
-    borderRadius: 14,
+    borderColor: "#E1E5EA",
+    padding: 14,
+    borderRadius: 15,
+    flexDirection: "row",
     alignItems: "center",
     marginBottom: 22,
   },
 
+  expenseIcon: {
+    fontSize: 22,
+    marginRight: 12,
+  },
+
   expenseButtonText: {
-    fontWeight: "800",
+    fontWeight: "900",
+    color: "#1F2937",
+  },
+
+  expenseSub: {
+    color: "#8A94A6",
+    fontSize: 11,
+    marginTop: 3,
+  },
+
+  arrow: {
+    fontSize: 28,
+    color: "#98A2B3",
+  },
+
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
 
   sectionTitle: {
@@ -2045,45 +2854,77 @@ const styles = StyleSheet.create({
     marginBottom: 11,
   },
 
+  countText: {
+    color: "#8A94A6",
+    fontSize: 12,
+    marginBottom: 11,
+  },
+
   tabs: {
     flexDirection: "row",
-    backgroundColor: "#e8edf3",
-    borderRadius: 13,
+    backgroundColor: "#E8EDF3",
+    borderRadius: 14,
     padding: 3,
     marginBottom: 11,
   },
 
   tab: {
     flex: 1,
-    paddingVertical: 11,
+    paddingVertical: 10,
     alignItems: "center",
-    borderRadius: 10,
+    borderRadius: 11,
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 6,
   },
 
   activeTab: {
-    backgroundColor: "#fff",
-    elevation: 1,
+    backgroundColor: "#FFFFFF",
+    elevation: 2,
   },
 
   tabText: {
-    fontWeight: "800",
+    fontWeight: "700",
     fontSize: 12,
+    color: "#667085",
+  },
+
+  activeTabText: {
+    color: "#167A46",
+    fontWeight: "900",
+  },
+
+  tabBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#E7EBF0",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 5,
+  },
+
+  tabBadgeText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#667085",
   },
 
   search: {
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderRadius: 13,
     paddingHorizontal: 14,
     paddingVertical: 13,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#e1e5ea",
+    borderColor: "#E1E5EA",
+    color: "#111827",
   },
 
   partyCard: {
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderRadius: 15,
-    padding: 13,
+    padding: 12,
     marginBottom: 9,
     flexDirection: "row",
     alignItems: "center",
@@ -2094,7 +2935,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#e8f4ed",
+    backgroundColor: "#E8F4ED",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
@@ -2103,7 +2944,7 @@ const styles = StyleSheet.create({
   avatarText: {
     fontSize: 18,
     fontWeight: "900",
-    color: "#167a46",
+    color: "#167A46",
   },
 
   partyInfo: {
@@ -2113,57 +2954,116 @@ const styles = StyleSheet.create({
   partyName: {
     fontSize: 16,
     fontWeight: "900",
+    color: "#1F2937",
   },
 
   partyPhone: {
     color: "#718096",
     marginTop: 3,
+    fontSize: 12,
+  },
+
+  balanceBox: {
+    alignItems: "flex-end",
+    marginLeft: 8,
+  },
+
+  balanceStatus: {
+    fontSize: 10,
+    fontWeight: "800",
+    marginBottom: 3,
   },
 
   partyBalance: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "900",
   },
 
   empty: {
     alignItems: "center",
-    paddingVertical: 35,
+    paddingVertical: 32,
+    paddingHorizontal: 20,
+  },
+
+  emptyCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: "#EAF3ED",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
   },
 
   emptyIcon: {
-    fontSize: 35,
-    marginBottom: 8,
+    fontSize: 31,
   },
 
   emptyTitle: {
     fontSize: 17,
     fontWeight: "900",
+    color: "#1F2937",
   },
 
   emptyText: {
     color: "#718096",
     marginTop: 5,
     textAlign: "center",
+    lineHeight: 19,
+  },
+
+  emptyButton: {
+    marginTop: 15,
+    backgroundColor: "#167A46",
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderRadius: 11,
+  },
+
+  emptyButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+  },
+
+  smallEmpty: {
+    alignItems: "center",
+    paddingVertical: 18,
   },
 
   statsCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 17,
     padding: 16,
     marginTop: 12,
     marginBottom: 22,
   },
 
+  statsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 7,
+  },
+
   statsTitle: {
     fontWeight: "900",
     fontSize: 17,
-    marginBottom: 10,
+  },
+
+  statsIcon: {
+    fontSize: 21,
   },
 
   statRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F2F5",
+  },
+
+  statTitle: {
+    color: "#4B5563",
   },
 
   greenText: {
@@ -2172,39 +3072,55 @@ const styles = StyleSheet.create({
   },
 
   redText: {
-    color: "#d32f2f",
+    color: "#D32F2F",
+    fontWeight: "900",
+  },
+
+  blueText: {
+    color: "#2463EB",
     fontWeight: "900",
   },
 
   transactionCard: {
-    backgroundColor: "#fff",
-    borderRadius: 13,
-    padding: 14,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    padding: 12,
     marginBottom: 8,
     flexDirection: "row",
     alignItems: "center",
   },
 
+  txIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: "#F1F4F7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
   transactionName: {
     fontWeight: "900",
     fontSize: 15,
+    color: "#1F2937",
   },
 
   transactionType: {
-    color: "#666",
+    color: "#667085",
     marginTop: 3,
+    fontSize: 12,
   },
 
   transactionDate: {
-    color: "#999",
-    fontSize: 12,
+    color: "#98A2B3",
+    fontSize: 11,
     marginTop: 3,
   },
 
   transactionAmount: {
     fontWeight: "900",
-    fontSize: 16,
-    marginLeft: 10,
+    fontSize: 15,
+    marginLeft: 8,
   },
 
   backButton: {
@@ -2212,37 +3128,39 @@ const styles = StyleSheet.create({
   },
 
   backText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "900",
+    color: "#167A46",
   },
 
   profileCard: {
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     padding: 20,
-    borderRadius: 18,
+    borderRadius: 20,
     alignItems: "center",
     marginBottom: 15,
   },
 
   bigAvatar: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: "#e8f4ed",
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: "#E8F4ED",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 10,
   },
 
   bigAvatarText: {
-    color: "#167a46",
-    fontSize: 28,
+    color: "#167A46",
+    fontSize: 29,
     fontWeight: "900",
   },
 
   profileName: {
     fontSize: 24,
     fontWeight: "900",
+    color: "#111827",
   },
 
   profilePhone: {
@@ -2251,20 +3169,34 @@ const styles = StyleSheet.create({
   },
 
   profileDetail: {
-    color: "#666",
+    color: "#667085",
     marginTop: 5,
     textAlign: "center",
+    fontSize: 12,
+  },
+
+  balanceDivider: {
+    width: "100%",
+    height: 1,
+    backgroundColor: "#EEF1F4",
+    marginTop: 17,
   },
 
   balanceCaption: {
     color: "#718096",
-    marginTop: 18,
+    marginTop: 14,
   },
 
   bigBalance: {
     fontSize: 30,
     fontWeight: "900",
-    marginTop: 5,
+    marginTop: 4,
+  },
+
+  balanceWord: {
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 2,
   },
 
   actionGrid: {
@@ -2276,56 +3208,68 @@ const styles = StyleSheet.create({
   receiveButton: {
     width: "48%",
     backgroundColor: "#168653",
-    paddingVertical: 14,
-    borderRadius: 13,
+    paddingVertical: 13,
+    borderRadius: 14,
     alignItems: "center",
     marginBottom: 10,
   },
 
   giveButton: {
     width: "48%",
-    backgroundColor: "#d32f2f",
-    paddingVertical: 14,
-    borderRadius: 13,
+    backgroundColor: "#D32F2F",
+    paddingVertical: 13,
+    borderRadius: 14,
     alignItems: "center",
     marginBottom: 10,
   },
 
-  actionButtonText: {
-    color: "#fff",
+  actionButtonIcon: {
+    color: "#FFFFFF",
+    fontSize: 18,
     fontWeight: "900",
+  },
+
+  actionButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    marginTop: 2,
   },
 
   normalAction: {
     width: "48%",
-    backgroundColor: "#fff",
-    paddingVertical: 14,
-    borderRadius: 13,
+    backgroundColor: "#FFFFFF",
+    paddingVertical: 13,
+    borderRadius: 14,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e1e5ea",
+    borderColor: "#E1E5EA",
     marginBottom: 10,
+  },
+
+  normalActionIcon: {
+    fontSize: 17,
   },
 
   normalActionText: {
     fontWeight: "900",
+    marginTop: 2,
   },
 
   contactRow: {
     flexDirection: "row",
     gap: 10,
-    marginTop: 5,
-    marginBottom: 12,
+    marginTop: 3,
+    marginBottom: 22,
   },
 
   contactButton: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     paddingVertical: 13,
     borderRadius: 13,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e1e5ea",
+    borderColor: "#E1E5EA",
   },
 
   contactText: {
@@ -2333,17 +3277,18 @@ const styles = StyleSheet.create({
   },
 
   deleteButton: {
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#efb7b7",
+    borderColor: "#EFB7B7",
     paddingVertical: 13,
     borderRadius: 13,
     alignItems: "center",
+    marginTop: 20,
     marginBottom: 20,
   },
 
   deleteText: {
-    color: "#d32f2f",
+    color: "#D32F2F",
     fontWeight: "900",
   },
 
@@ -2352,12 +3297,15 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderTopWidth: 1,
-    borderTopColor: "#e9edf1",
+    borderTopColor: "#E9EDF1",
     flexDirection: "row",
     paddingVertical: 9,
-    paddingBottom: Platform.OS === "ios" ? 22 : 9,
+    paddingBottom:
+      Platform.OS === "ios"
+        ? 22
+        : 9,
   },
 
   bottomItem: {
@@ -2373,18 +3321,20 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 2,
     fontWeight: "700",
+    color: "#475467",
   },
 
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.48)",
+    backgroundColor:
+      "rgba(0,0,0,0.48)",
     justifyContent: "flex-end",
   },
 
   modalBox: {
-    backgroundColor: "#f6f8fa",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    backgroundColor: "#F6F8FA",
+    borderTopLeftRadius: 25,
+    borderTopRightRadius: 25,
     maxHeight: "94%",
     padding: 18,
   },
@@ -2399,37 +3349,64 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 21,
     fontWeight: "900",
+    color: "#111827",
+  },
+
+  modalSub: {
+    color: "#718096",
+    fontSize: 11,
+    marginTop: 3,
+  },
+
+  closeButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   closeText: {
-    fontSize: 22,
+    fontSize: 19,
     color: "#555",
   },
 
   contactPickerButton: {
-    backgroundColor: "#167a46",
-    borderRadius: 15,
-    padding: 14,
+    backgroundColor: "#167A46",
+    borderRadius: 16,
+    padding: 13,
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 17,
   },
 
-  contactPickerIcon: {
-    fontSize: 27,
-    marginRight: 12,
+  contactPickerCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 11,
   },
 
   contactPickerTitle: {
-    color: "#fff",
+    color: "#FFFFFF",
     fontSize: 15,
     fontWeight: "900",
   },
 
   contactPickerSub: {
-    color: "#d9f2e4",
+    color: "#D9F2E4",
     marginTop: 3,
     fontSize: 11,
+  },
+
+  contactPickerArrow: {
+    color: "#FFFFFF",
+    fontSize: 28,
+    marginLeft: 8,
   },
 
   field: {
@@ -2444,13 +3421,14 @@ const styles = StyleSheet.create({
   },
 
   input: {
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#dfe3e8",
+    borderColor: "#DFE3E8",
     borderRadius: 12,
     paddingHorizontal: 13,
     paddingVertical: 12,
     fontSize: 15,
+    color: "#111827",
   },
 
   choiceRow: {
@@ -2461,17 +3439,17 @@ const styles = StyleSheet.create({
   },
 
   choice: {
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#DDD",
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
 
   choiceActive: {
-    backgroundColor: "#222",
-    borderColor: "#222",
+    backgroundColor: "#222222",
+    borderColor: "#222222",
   },
 
   choiceText: {
@@ -2479,12 +3457,12 @@ const styles = StyleSheet.create({
   },
 
   choiceTextActive: {
-    color: "#fff",
+    color: "#FFFFFF",
     fontWeight: "800",
   },
 
   saveButton: {
-    backgroundColor: "#167a46",
+    backgroundColor: "#167A46",
     paddingVertical: 15,
     borderRadius: 13,
     alignItems: "center",
@@ -2492,27 +3470,37 @@ const styles = StyleSheet.create({
   },
 
   saveButtonText: {
-    color: "#fff",
+    color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "900",
   },
 
   lockScreen: {
     flex: 1,
-    backgroundColor: "#f4f7fb",
+    backgroundColor: "#F4F7FB",
     alignItems: "center",
     justifyContent: "center",
     padding: 25,
   },
 
-  lockIcon: {
-    fontSize: 50,
+  lockCircle: {
+    width: 85,
+    height: 85,
+    borderRadius: 43,
+    backgroundColor: "#E8F4ED",
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: 15,
+  },
+
+  lockIcon: {
+    fontSize: 42,
   },
 
   lockTitle: {
     fontSize: 25,
     fontWeight: "900",
+    color: "#111827",
   },
 
   lockText: {
@@ -2523,9 +3511,9 @@ const styles = StyleSheet.create({
 
   pinInput: {
     width: "80%",
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "#DDD",
     borderRadius: 12,
     padding: 15,
     textAlign: "center",
@@ -2535,7 +3523,7 @@ const styles = StyleSheet.create({
 
   unlockButton: {
     width: "80%",
-    backgroundColor: "#167a46",
+    backgroundColor: "#167A46",
     paddingVertical: 15,
     borderRadius: 13,
     alignItems: "center",
@@ -2543,7 +3531,7 @@ const styles = StyleSheet.create({
   },
 
   unlockText: {
-    color: "#fff",
+    color: "#FFFFFF",
     fontWeight: "900",
     fontSize: 16,
   },

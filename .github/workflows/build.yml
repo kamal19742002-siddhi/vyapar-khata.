@@ -416,7 +416,59 @@ jobs:
           echo ""
           echo "===== PATCHED FILE AREA ====="
           nl -ba "$FILE" | sed -n '158,172p'
+      - name: Set Android Minimum SDK to 24
+        working-directory: android
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
 
+          path = Path("app/build.gradle")
+
+          if not path.exists():
+              sys.exit("ERROR: android/app/build.gradle not found")
+
+          text = path.read_text()
+          original = text
+
+          text = re.sub(
+              r'(\bminSdkVersion\s*=\s*)\d+',
+              r'\g<1>24',
+              text
+          )
+
+          text = re.sub(
+              r'(\bminSdkVersion\s+)\\?\d+',
+              r'\g<1>24',
+              text
+          )
+
+          text = re.sub(
+              r'(\bminSdk\s*=\s*)\d+',
+              r'\g<1>24',
+              text
+          )
+
+          if text == original:
+              print("No direct minSdk value changed; checking Expo config.")
+          else:
+              path.write_text(text)
+              print("Updated minSdk setting in app/build.gradle")
+
+          check = path.read_text()
+
+          if not re.search(
+              r'minSdkVersion\s*=?\s*24|\bminSdk\s*=\s*24',
+              check
+          ):
+              sys.exit(
+                  "ERROR: Could not verify minSdkVersion 24 in app/build.gradle"
+              )
+
+          print("Minimum SDK verification passed.")
+          PY
 
       # ============================================
       # BUILD RELEASE AAB

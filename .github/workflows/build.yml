@@ -1,3 +1,4 @@
+
 name: Build Vyapar Khata AAB
 
 on:
@@ -34,6 +35,7 @@ jobs:
           java-version: "17"
 
       - name: Verify App Source
+        shell: bash
         run: |
           if [ ! -f App.js ]; then
             echo "ERROR: App.js is missing."
@@ -41,6 +43,7 @@ jobs:
           fi
 
       - name: Create package.json
+        shell: bash
         run: |
           cat > package.json <<'EOF'
           {
@@ -65,6 +68,7 @@ jobs:
         run: npm install --legacy-peer-deps
 
       - name: Create Babel Config
+        shell: bash
         run: |
           cat > babel.config.js <<'EOF'
           module.exports = function(api) {
@@ -76,6 +80,7 @@ jobs:
           EOF
 
       - name: Create index.js
+        shell: bash
         run: |
           cat > index.js <<'EOF'
           import { registerRootComponent } from "expo";
@@ -84,6 +89,7 @@ jobs:
           EOF
 
       - name: Create app.json
+        shell: bash
         run: |
           cat > app.json <<EOF
           {
@@ -101,6 +107,7 @@ jobs:
           EOF
 
       - name: Expo Prebuild
+        shell: bash
         run: |
           npx expo prebuild \
             --platform android \
@@ -108,6 +115,7 @@ jobs:
             --clean
 
       - name: Fix Splash Resource
+        shell: bash
         run: |
           mkdir -p android/app/src/main/res/values
 
@@ -118,7 +126,7 @@ jobs:
           </resources>
           EOF
 
-      - name: Set Android Minimum SDK to 24
+      - name: Set and Verify Android Minimum SDK
         shell: bash
         run: |
           python3 - <<'PY'
@@ -127,40 +135,56 @@ jobs:
           import sys
 
           app_gradle = Path("android/app/build.gradle")
+          root_gradle = Path("android/build.gradle")
+          properties = Path("android/gradle.properties")
 
-          if not app_gradle.exists():
-              sys.exit("ERROR: android/app/build.gradle not found")
+          for path in (app_gradle, root_gradle, properties):
+              if not path.exists():
+                  sys.exit(f"ERROR: Required file not found: {path}")
 
-          text = app_gradle.read_text()
+          # Configure the property used by Expo's root Gradle template.
+          prop_text = properties.read_text()
 
-          patterns = [
-              (r'(\bminSdkVersion\s*=\s*)\d+', r'\g<1>24'),
-              (r'(\bminSdkVersion\s+)\d+\b', r'\g<1>24'),
-              (r'(\bminSdk\s*=\s*)\d+', r'\g<1>24'),
-              (r'(\bminSdk\s+)\d+\b', r'\g<1>24'),
-          ]
+          prop_text = re.sub(
+              r'(?m)^[ \t]*android\.minSdkVersion[ \t]*=.*(?:\n|$)',
+              '',
+              prop_text
+          ).rstrip()
 
-          for pattern, replacement in patterns:
-              text = re.sub(pattern, replacement, text)
+          prop_text += '\nandroid.minSdkVersion=24\n'
+          properties.write_text(prop_text)
 
-          app_gradle.write_text(text)
-
-          print("Minimum SDK configuration:")
-          for line in text.splitlines():
-              if "minSdk" in line:
-                  print(line.strip())
+          # Ensure root Gradle actually uses the configurable property.
+          root_text = root_gradle.read_text()
 
           if not re.search(
-              r'\bminSdkVersion\s*(?:=|\s)\s*24\b'
-              r'|\bminSdk\s*(?:=|\s)\s*24\b',
-              text
+              r'findProperty\s*\(\s*[\'"]android\.minSdkVersion[\'"]\s*\)',
+              root_text
           ):
-              sys.exit(
-                  "ERROR: Could not verify minSdk 24 in app/build.gradle. "
-                  "The project may use a variable-based SDK configuration."
+              print(
+                  "Root Gradle does not use android.minSdkVersion "
+                  "through findProperty."
               )
+              print("Checking the root SDK configuration instead.")
 
-          print("Minimum SDK 24 verified.")
+              if not re.search(
+                  r'\bminSdkVersion\s*=\s*24\b',
+                  root_text
+              ):
+                  sys.exit(
+                      "ERROR: Root Gradle SDK configuration needs "
+                      "manual verification."
+                  )
+
+          print("gradle.properties:")
+          print("android.minSdkVersion=24")
+
+          print("app/build.gradle:")
+          for line in app_gradle.read_text().splitlines():
+              if "minSdkVersion" in line or "minSdk " in line:
+                  print(line.strip())
+
+          print("Minimum SDK property configured successfully.")
           PY
 
       - name: Restore Existing Signing Key
@@ -211,7 +235,7 @@ jobs:
 
           text = path.read_text()
 
-          # Remove previous injected signing configuration.
+          # Remove previously injected signing configuration.
           text = re.sub(
               r'(?s)\s*// VYAPAR_SIGNING_START.*?'
               r'// VYAPAR_SIGNING_END\s*',
@@ -219,7 +243,7 @@ jobs:
               text
           )
 
-          # Remove existing references to our custom signing config.
+          # Remove old custom signing references.
           text = re.sub(
               r'(?m)^\s*signingConfig\s+'
               r'signingConfigs\.vyaparRelease\s*$\n?',
@@ -236,10 +260,12 @@ jobs:
           )
 
           android_pos = text.find("android {")
+
           if android_pos < 0:
               sys.exit("ERROR: android block not found")
 
           build_types_pos = text.find("buildTypes {", android_pos)
+
           if build_types_pos < 0:
               sys.exit("ERROR: buildTypes block not found")
 

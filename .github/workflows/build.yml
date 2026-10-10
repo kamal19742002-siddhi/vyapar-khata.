@@ -36,7 +36,7 @@ jobs:
       - name: Verify App Source
         run: |
           if [ ! -f App.js ]; then
-            echo "ERROR: App.js is missing. Keep your existing app source."
+            echo "ERROR: App.js is missing."
             exit 1
           fi
 
@@ -121,86 +121,52 @@ jobs:
       - name: Set Android Minimum SDK to 24
         shell: bash
         run: |
-          python3 <<'PYCODE'
+          python3 - <<'PY'
           from pathlib import Path
           import re
           import sys
 
-          # Search recursively through all generated gradle files across the native project tree
-          candidates = list(Path("android").rglob("*.gradle"))
-          changed = []
-
-          print(f"Scanning {len(candidates)} Gradle configuration files for SDK variables...")
-
-          for path in candidates:
-              original = path.read_text()
-              text = original
-
-              # Pattern 1: Catch variables like minSdkVersion = 23 or minSdk = 23
-              text = re.sub(
-                  r'\b(minSdkVersion\s*=\s*)\d+',
-                  r'\g<1>24',
-                  text
-              )
-
-              # Pattern 2: Catch space notation like minSdkVersion 23
-              text = re.sub(
-                  r'\b(minSdkVersion\s+)\d+(\b)',
-                  r'\g<1>24\g<2>',
-                  text
-              )
-
-              # Pattern 3: Catch modern Android DSL configuration lines like minSdk 23 or minSdk = 23
-              text = re.sub(
-                  r'\b(minSdk\s*=\s*)\d+',
-                  r'\g<1>24',
-                  text
-              )
-              text = re.sub(
-                  r'\b(minSdk\s+)\d+(\b)',
-                  r'\g<1>24\g<2>',
-                  text
-              )
-
-              if text != original:
-                  path.write_text(text)
-                  changed.append(str(path))
-
-          # Double-check specific core native execution files to ensure total Google Play compliance
           app_gradle = Path("android/app/build.gradle")
-          root_gradle = Path("android/build.gradle")
-          
-          all_text = ""
-          if app_gradle.exists(): all_text += app_gradle.read_text()
-          if root_gradle.exists(): all_text += root_gradle.read_text()
 
-          # Strict structural verification regex match check
-          verified = bool(re.search(r'minSdkVersion\s*=\s*24|minSdkVersion\s+24|\bminSdk\s*=\s*24|\bminSdk\s+24', all_text))
+          if not app_gradle.exists():
+              sys.exit("ERROR: android/app/build.gradle not found")
 
-          if not verified:
-              print("Warning: Standard matching pattern missed base code configurations. Enforcing fallback block injection...")
-              if app_gradle.exists():
-                  content = app_gradle.read_text()
-                  if "minSdkVersion" in content:
-                      content = re.sub(r'minSdkVersion\s*=\s*\d+', 'minSdkVersion = 24', content)
-                      app_gradle.write_text(content)
-                      verified = True
+          text = app_gradle.read_text()
 
-          if not verified:
+          patterns = [
+              (r'(\bminSdkVersion\s*=\s*)\d+', r'\g<1>24'),
+              (r'(\bminSdkVersion\s+)\d+\b', r'\g<1>24'),
+              (r'(\bminSdk\s*=\s*)\d+', r'\g<1>24'),
+              (r'(\bminSdk\s+)\d+\b', r'\g<1>24'),
+          ]
+
+          for pattern, replacement in patterns:
+              text = re.sub(pattern, replacement, text)
+
+          app_gradle.write_text(text)
+
+          print("Minimum SDK configuration:")
+          for line in text.splitlines():
+              if "minSdk" in line:
+                  print(line.strip())
+
+          if not re.search(
+              r'\bminSdkVersion\s*(?:=|\s)\s*24\b'
+              r'|\bminSdk\s*(?:=|\s)\s*24\b',
+              text
+          ):
               sys.exit(
-                  "ERROR: Verification failed. The system could not modify the minSdkVersion configuration "
-                  "to 24 in the generated native build files."
+                  "ERROR: Could not verify minSdk 24 in app/build.gradle. "
+                  "The project may use a variable-based SDK configuration."
               )
 
-          print(
-              "Success! Minimum SDK version 24 successfully injected and verified.\n"
-              + "Modified files: " + (", ".join(changed) if changed else "None (Already set upstream)")
-          )
-          PYCODE
+          print("Minimum SDK 24 verified.")
+          PY
 
       - name: Restore Existing Signing Key
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        shell: bash
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
             echo "ERROR: KEYSTORE_BASE64 secret is missing."
@@ -213,17 +179,18 @@ jobs:
             > android/app/upload-keystore.jks
 
           if [ ! -s android/app/upload-keystore.jks ]; then
-            echo "ERROR: Keystore was not restored."
+            echo "ERROR: Keystore could not be restored."
             exit 1
           fi
 
-          echo "Existing signing keystore restored."
+          echo "Signing keystore restored."
 
       - name: Configure Signing
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        shell: bash
         run: |
           if [ -z "$KEYSTORE_PASSWORD" ] || \
              [ -z "$KEY_ALIAS" ] || \
@@ -232,38 +199,49 @@ jobs:
             exit 1
           fi
 
-          python3 <<'PY'
+          python3 - <<'PY'
           from pathlib import Path
           import re
+          import sys
 
           path = Path("android/app/build.gradle")
+
+          if not path.exists():
+              sys.exit("ERROR: android/app/build.gradle not found")
+
           text = path.read_text()
 
+          # Remove previous injected signing configuration.
           text = re.sub(
-              r'(?s)// VYAPAR_SIGNING_START.*?// VYAPAR_SIGNING_END',
+              r'(?s)\s*// VYAPAR_SIGNING_START.*?'
+              r'// VYAPAR_SIGNING_END\s*',
+              '\n',
+              text
+          )
+
+          # Remove existing references to our custom signing config.
+          text = re.sub(
+              r'(?m)^\s*signingConfig\s+'
+              r'signingConfigs\.vyaparRelease\s*$\n?',
               '',
               text
           )
 
           text = re.sub(
-              r'\n\s*signingConfig\s+signingConfigs\.vyaparRelease',
-              '',
-              text
-          )
-
-          text = re.sub(
-              r'\n\s*signingConfig\s+signingConfigs\.getByName\(["\']vyaparRelease["\']\)',
+              r'(?m)^\s*signingConfig\s+'
+              r'signingConfigs\.getByName\(["\']vyaparRelease["\']\)'
+              r'\s*$\n?',
               '',
               text
           )
 
           android_pos = text.find("android {")
-          if android_pos == -1:
-              raise SystemExit("ERROR: android block not found")
+          if android_pos < 0:
+              sys.exit("ERROR: android block not found")
 
           build_types_pos = text.find("buildTypes {", android_pos)
-          if build_types_pos == -1:
-              raise SystemExit("ERROR: buildTypes block not found")
+          if build_types_pos < 0:
+              sys.exit("ERROR: buildTypes block not found")
 
           signing_block = '''
               // VYAPAR_SIGNING_START
@@ -285,11 +263,11 @@ jobs:
               + text[build_types_pos:]
           )
 
-          build_types_pos = text.find("buildTypes {")
+          build_types_pos = text.find("buildTypes {", android_pos)
           release_pos = text.find("release {", build_types_pos)
 
-          if release_pos == -1:
-              raise SystemExit("ERROR: release block not found")
+          if release_pos < 0:
+              sys.exit("ERROR: release block not found")
 
           depth = 0
           release_end = None
@@ -304,21 +282,51 @@ jobs:
                       break
 
           if release_end is None:
-              raise SystemExit("ERROR: release block end not found")
+              sys.exit("ERROR: release block end not found")
 
           release_content = text[release_pos:release_end]
 
           if "signingConfig" not in release_content:
               insert_at = release_pos + len("release {")
-              text = text[:insert_at] + "\n            signingConfig signingConfigs.vyaparRelease" + text[insert_at:]
+              text = (
+                  text[:insert_at]
+                  + "\n            signingConfig signingConfigs.vyaparRelease"
+                  + text[insert_at:]
+              )
 
           path.write_text(text)
-          print("Signing block and configurations successfully injected into build.gradle pipeline.")
+          print("Release signing configuration added.")
           PY
 
       - name: Build Production Android App Bundle (AAB)
+        shell: bash
         run: |
           cd android
           chmod +x gradlew
           ./gradlew bundleRelease --no-daemon
 
+      - name: Verify AAB File
+        if: success()
+        shell: bash
+        run: |
+          AAB="android/app/build/outputs/bundle/release/app-release.aab"
+
+          echo "Searching for generated AAB files..."
+          find android -type f -name "*.aab" -print
+
+          if [ ! -s "$AAB" ]; then
+            echo "ERROR: Expected AAB file not found: $AAB"
+            exit 1
+          fi
+
+          ls -lh "$AAB"
+          echo "AAB file verified."
+
+      - name: Upload AAB Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vyapar-Khata-AAB
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14

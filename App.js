@@ -4,7 +4,6 @@ import {
   TouchableOpacity, ScrollView, StyleSheet, Switch, Share
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as Contacts from 'expo-contacts';
 

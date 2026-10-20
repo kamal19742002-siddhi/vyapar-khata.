@@ -1,29 +1,32 @@
+
 {
   "expo": {
-    "name": "Vyapar Khata",
+    "name": "Vyapar Khata Book",
     "slug": "vyapar-khata",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
-    "ios": {
-      "supportsTablet": true
+      "backgroundColor": "#0f172a"
     },
     "android": {
+      "package": "com.vyapar.khatabook.free",
+      "versionCode": 6,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      },
-      "package": "com.kamal.vyaparkhata",
-      "versionCode": 1
+        "backgroundColor": "#0f172a"
+      }
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    }
+    "plugins": [
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow Vyapar Khata to access your contacts to quickly add customer profiles."
+        }
+      ]
+    ]
   }
 }

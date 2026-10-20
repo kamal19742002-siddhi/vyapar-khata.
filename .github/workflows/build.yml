@@ -1,4 +1,3 @@
-
 name: Build Vyapar Khata AAB
 
 on:
@@ -142,9 +141,7 @@ jobs:
               if not path.exists():
                   sys.exit(f"ERROR: Required file not found: {path}")
 
-          # Configure the property used by Expo's root Gradle template.
           prop_text = properties.read_text()
-
           prop_text = re.sub(
               r'(?m)^[ \t]*android\.minSdkVersion[ \t]*=.*(?:\n|$)',
               '',
@@ -154,19 +151,11 @@ jobs:
           prop_text += '\nandroid.minSdkVersion=24\n'
           properties.write_text(prop_text)
 
-          # Ensure root Gradle actually uses the configurable property.
           root_text = root_gradle.read_text()
-
           if not re.search(
               r'findProperty\s*\(\s*[\'"]android\.minSdkVersion[\'"]\s*\)',
               root_text
           ):
-              print(
-                  "Root Gradle does not use android.minSdkVersion "
-                  "through findProperty."
-              )
-              print("Checking the root SDK configuration instead.")
-
               if not re.search(
                   r'\bminSdkVersion\s*=\s*24\b',
                   root_text
@@ -175,14 +164,6 @@ jobs:
                       "ERROR: Root Gradle SDK configuration needs "
                       "manual verification."
                   )
-
-          print("gradle.properties:")
-          print("android.minSdkVersion=24")
-
-          print("app/build.gradle:")
-          for line in app_gradle.read_text().splitlines():
-              if "minSdkVersion" in line or "minSdk " in line:
-                  print(line.strip())
 
           print("Minimum SDK property configured successfully.")
           PY
@@ -229,13 +210,10 @@ jobs:
           import sys
 
           path = Path("android/app/build.gradle")
-
           if not path.exists():
               sys.exit("ERROR: android/app/build.gradle not found")
 
           text = path.read_text()
-
-          # Remove previously injected signing configuration.
           text = re.sub(
               r'(?s)\s*// VYAPAR_SIGNING_START.*?'
               r'// VYAPAR_SIGNING_END\s*',
@@ -243,31 +221,8 @@ jobs:
               text
           )
 
-          # Remove old custom signing references.
-          text = re.sub(
-              r'(?m)^\s*signingConfig\s+'
-              r'signingConfigs\.vyaparRelease\s*$\n?',
-              '',
-              text
-          )
-
-          text = re.sub(
-              r'(?m)^\s*signingConfig\s+'
-              r'signingConfigs\.getByName\(["\']vyaparRelease["\']\)'
-              r'\s*$\n?',
-              '',
-              text
-          )
-
           android_pos = text.find("android {")
-
-          if android_pos < 0:
-              sys.exit("ERROR: android block not found")
-
           build_types_pos = text.find("buildTypes {", android_pos)
-
-          if build_types_pos < 0:
-              sys.exit("ERROR: buildTypes block not found")
 
           signing_block = '''
               // VYAPAR_SIGNING_START
@@ -280,7 +235,6 @@ jobs:
                   }
               }
               // VYAPAR_SIGNING_END
-
           '''
 
           text = (
@@ -292,12 +246,8 @@ jobs:
           build_types_pos = text.find("buildTypes {", android_pos)
           release_pos = text.find("release {", build_types_pos)
 
-          if release_pos < 0:
-              sys.exit("ERROR: release block not found")
-
           depth = 0
           release_end = None
-
           for i in range(release_pos, len(text)):
               if text[i] == "{":
                   depth += 1
@@ -307,11 +257,7 @@ jobs:
                       release_end = i
                       break
 
-          if release_end is None:
-              sys.exit("ERROR: release block end not found")
-
           release_content = text[release_pos:release_end]
-
           if "signingConfig" not in release_content:
               insert_at = release_pos + len("release {")
               text = (
@@ -356,3 +302,15 @@ jobs:
           path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 14
+
+      - name: Verify Upload Key SHA1
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        shell: bash
+        run: |
+          keytool -list -v \
+            -keystore android/app/upload-keystore.jks \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -alias "$KEY_ALIAS" \
+            | grep -E "SHA1:"

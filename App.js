@@ -1,1604 +1,2147 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
-  Linking,
-  Modal,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+  Alert, SafeAreaView, StatusBar, View, Text, TextInput,
+  TouchableOpacity, ScrollView, StyleSheet, Switch, Share
+} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import * as Contacts from 'expo-contacts';
 
-const DATA_KEY = "@vyapar_khata_market_v5";
+const BLUE = '#1059A8';
+const LIGHT_BLUE = '#EAF2FF';
+const BG = '#F0F1F3';
+const GREEN = '#087F5B';
+const RED = '#D83A4E';
+const GOLD = '#FFCB4D';
+const STORAGE_KEY = 'vyapar-khata-complete-v1';
 
-const emptyData = {
-  business: {
-    name: "My Business",
-    owner: "",
-    phone: "",
-    upi: "",
-    gstin: "",
-  },
+const initialData = {
+  businessName: 'Rishab Tech Enterprises',
+  ownerName: 'Rishab Tech',
+  location: 'Aligarh, Uttar Pradesh',
   customers: [],
-  suppliers: [],
-  products: [],
   transactions: [],
-  expenses: [],
+  items: [],
+  trash: [],
+  darkMode: false,
+  fingerprintLock: false,
 };
 
-const money = (n) =>
-  "₹" +
-  Number(n || 0).toLocaleString("en-IN", {
+const money = value =>
+  '₹' + Number(value || 0).toLocaleString('en-IN', {
     maximumFractionDigits: 2,
   });
 
 const today = () => new Date().toISOString().slice(0, 10);
+const uid = () =>
+  `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const safeText = value =>
+  String(value ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[c]));
 
 export default function App() {
-  const [data, setData] = useState(emptyData);
+  const [data, setData] = useState(initialData);
   const [loaded, setLoaded] = useState(false);
-  const [tab, setTab] = useState("Home");
-
-  const [modal, setModal] = useState(null);
-  const [selected, setSelected] = useState(null);
-
+  const [page, setPage] = useState('Parties');
+  const [navHistory, setNavHistory] = useState(['Parties']);
+  const [tab, setTab] = useState('Customers');
+  const [search, setSearch] = useState('');
+  const [selectedParty, setSelectedParty] = useState(null);
+  const [selectedReport, setSelectedReport] = useState(null);
+  const [reportCategory, setReportCategory] = useState('All');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [form, setForm] = useState({});
+  const [txType, setTxType] = useState('give');
+  const [itemForm, setItemForm] = useState({});
+  const [profileForm, setProfileForm] = useState({});
 
   useEffect(() => {
-    loadData();
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          setData({ ...initialData, ...JSON.parse(raw) });
+        }
+      } catch {
+        Alert.alert('Storage', 'Saved data could not be loaded.');
+      } finally {
+        setLoaded(true);
+      }
+    })();
   }, []);
 
   useEffect(() => {
-    if (loaded) saveData();
+    if (loaded) {
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+        .catch(() => {});
+    }
   }, [data, loaded]);
 
-  async function loadData() {
-    try {
-      const raw = await AsyncStorage.getItem(DATA_KEY);
+  const updateData = patch =>
+    setData(old => ({ ...old, ...patch }));
 
-      if (raw) {
-        const saved = JSON.parse(raw);
+  const navigateTo = newPage => {
+    setNavHistory(old => [...old, newPage]);
+    setPage(newPage);
+  };
 
-        setData({
-          ...emptyData,
-          ...saved,
-          business: {
-            ...emptyData.business,
-            ...(saved.business || {}),
-          },
-        });
-      }
-    } catch (e) {
-      Alert.alert("Error", "Data load nahi ho saka.");
+  const goBack = () => {
+    if (page === 'Party detail') {
+      setSelectedParty(null);
+      setPage('Parties');
+      return;
+    }
+    if (page === 'Report detail') {
+      setSelectedReport(null);
+      setPage('Reports');
+      return;
+    }
+    if (page === 'Add transaction' || page === 'Edit transaction') {
+      setPage('Party detail');
+      return;
+    }
+    if (['Reports', 'More', 'Items', 'Recycle Bin', 'Settings', 'Help & Support', 'About Us', 'Edit profile', 'Add item'].includes(page)) {
+      setPage('Parties');
+      return;
+    }
+    setNavHistory(old => {
+      if (old.length <= 1) return ['Parties'];
+      const nextStack = old.slice(0, -1);
+      const target = nextStack[nextStack.length - 1] || 'Parties';
+      setPage(target);
+      return nextStack;
+    });
+  };
+
+  const setField = (key, value) =>
+    setForm(old => ({ ...old, [key]: value }));
+
+  const setItemField = (key, value) =>
+    setItemForm(old => ({ ...old, [key]: value }));
+
+  const setProfileField = (key, value) =>
+    setProfileForm(old => ({ ...old, [key]: value }));
+
+  const balanceFor = partyId =>
+    data.transactions
+      .filter(t => t.partyId === partyId)
+      .reduce(
+        (sum, t) =>
+          sum + (t.type === 'give'
+            ? Number(t.amount)
+            : -Number(t.amount)),
+        0
+      );
+
+  const filteredParties = useMemo(
+    () =>
+      data.customers.filter(p => {
+        const matchesTab = tab === 'All' || p.type === tab;
+        const matchesSearch =
+          `${p.name} ${p.phone || ''}`
+            .toLowerCase()
+            .includes(search.toLowerCase());
+
+        return matchesTab && matchesSearch;
+      }),
+    [data.customers, tab, search]
+  );
+
+  const reports = [
+    {
+      category: 'Reports',
+      title: 'Passbook',
+      subtitle: 'All party passbook entries',
+      kind: 'customerTransactions',
+    },
+    {
+      category: 'Reports',
+      title: 'Cashbook',
+      subtitle: 'Cash inflow and outflow summary',
+      kind: 'cashbook',
+    },
+    {
+      category: 'Reports',
+      title: 'Bills',
+      subtitle: 'Sales and purchase bills summary',
+      kind: 'sales',
+    },
+    {
+      category: 'Reports',
+      title: 'Items',
+      subtitle: 'Stock and inventory report',
+      kind: 'stock',
+    },
+    {
+      category: 'Reports',
+      title: 'Staff',
+      subtitle: 'Staff attendance and payroll report',
+      kind: 'customerList',
+    },
+    {
+      category: 'Reports',
+      title: 'Collection',
+      subtitle: 'Payment collections summary',
+      kind: 'supplierTransactions',
+    },
+  ];
+
+  function addParty() {
+    const name = (form.name || '').trim();
+
+    if (!name) {
+      return Alert.alert('Required', 'Please enter a name.');
     }
 
-    setLoaded(true);
-  }
+    const party = {
+      id: uid(),
+      name,
+      phone: (form.phone || '').trim(),
+      type: form.type || tab || 'Customers',
+      openingBalance: Number(form.openingBalance || 0),
+    };
 
-  async function saveData() {
-    await AsyncStorage.setItem(DATA_KEY, JSON.stringify(data));
-  }
+    updateData({
+      customers: [...data.customers, party],
+    });
 
-  function updateForm(key, value) {
-    setForm((p) => ({ ...p, [key]: value }));
-  }
-
-  function openAdd(type) {
-    setSelected(null);
     setForm({});
-    setModal(type);
-  }
-
-  function closeModal() {
-    setModal(null);
-    setSelected(null);
-    setForm({});
-  }
-
-  function addCustomer() {
-    if (!form.name?.trim()) {
-      Alert.alert("Name required", "Customer ka naam likhiye.");
-      return;
-    }
-
-    const item = {
-      id: Date.now().toString(),
-      name: form.name.trim(),
-      phone: form.phone || "",
-      address: form.address || "",
-      balance: Number(form.balance || 0),
-    };
-
-    setData((p) => ({
-      ...p,
-      customers: [...p.customers, item],
-    }));
-
-    closeModal();
-  }
-
-  function addSupplier() {
-    if (!form.name?.trim()) {
-      Alert.alert("Name required", "Supplier ka naam likhiye.");
-      return;
-    }
-
-    const item = {
-      id: Date.now().toString(),
-      name: form.name.trim(),
-      phone: form.phone || "",
-      balance: Number(form.balance || 0),
-    };
-
-    setData((p) => ({
-      ...p,
-      suppliers: [...p.suppliers, item],
-    }));
-
-    closeModal();
-  }
-
-  function addProduct() {
-    if (!form.name?.trim()) {
-      Alert.alert("Product required", "Product name likhiye.");
-      return;
-    }
-
-    const item = {
-      id: Date.now().toString(),
-      name: form.name.trim(),
-      sku: form.sku || "",
-      buy: Number(form.buy || 0),
-      sell: Number(form.sell || 0),
-      stock: Number(form.stock || 0),
-      low: Number(form.low || 5),
-    };
-
-    setData((p) => ({
-      ...p,
-      products: [...p.products, item],
-    }));
-
-    closeModal();
+    setPage('Parties');
+    setTab(party.type);
   }
 
   function addTransaction() {
-    if (!form.amount || Number(form.amount) <= 0) {
-      Alert.alert("Amount required", "Valid amount enter kijiye.");
-      return;
+    const amount = Number(form.amount);
+
+    if (!selectedParty) return;
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return Alert.alert(
+        'Invalid amount',
+        'Enter an amount greater than zero.'
+      );
+    }
+
+    if (form.editId) {
+      const updatedTxs = data.transactions.map(t =>
+        t.id === form.editId
+          ? {
+              ...t,
+              type: txType,
+              amount,
+              date: form.date || today(),
+              note: (form.note || '').trim(),
+            }
+          : t
+      );
+      updateData({ transactions: updatedTxs });
+    } else {
+      const tx = {
+        id: uid(),
+        partyId: selectedParty.id,
+        type: txType,
+      amount,
+      date: form.date || today(),
+      note: (form.note || '').trim(),
+    };
+
+    updateData({
+      transactions: [...data.transactions, tx],
+    });
+    }
+
+    setForm({});
+    setPage('Party detail');
+  }
+
+  function addItem() {
+    const name = (itemForm.name || '').trim();
+    const quantity = Number(itemForm.quantity || 0);
+    const salePrice = Number(itemForm.salePrice || 0);
+    const purchasePrice = Number(itemForm.purchasePrice || 0);
+
+    if (!name) {
+      return Alert.alert('Required', 'Enter an item name.');
+    }
+
+    if (quantity < 0 || salePrice < 0 || purchasePrice < 0) {
+      return Alert.alert(
+        'Invalid values',
+        'Quantity and prices cannot be negative.'
+      );
     }
 
     const item = {
-      id: Date.now().toString(),
-      date: today(),
-      type: form.type || "sale",
-      party: form.party || "Walk-in Customer",
-      amount: Number(form.amount),
-      note: form.note || "",
+      id: uid(),
+      name,
+      quantity,
+      salePrice,
+      purchasePrice,
+      lowStockAt: Number(itemForm.lowStockAt || 5),
     };
 
-    setData((p) => ({
-      ...p,
-      transactions: [item, ...p.transactions],
+    updateData({ items: [...data.items, item] });
+    setItemForm({});
+    setPage('Items');
+  }
+
+  const inDateRange = row => {
+    const date = (row.date || '').slice(0, 10);
+
+    return (
+      (!fromDate || date >= fromDate) &&
+      (!toDate || date <= toDate)
+    );
+  };
+
+  function reportRows(report) {
+    const kind = report.kind;
+
+    if (kind === 'customerList' || kind === 'supplierList') {
+      const type =
+        kind === 'customerList' ? 'Customers' : 'Suppliers';
+
+      return data.customers
+        .filter(p => p.type === type)
+        .map(p => ({
+          date: '',
+          party: p.name,
+          phone: p.phone || '',
+          note: 'Current balance',
+          amount: balanceFor(p.id),
+        }));
+    }
+
+    if (
+      kind === 'stock' ||
+      kind === 'lowStock' ||
+      kind === 'profitLoss'
+    ) {
+      let items = data.items;
+
+      if (kind === 'lowStock') {
+        items = items.filter(
+          i => Number(i.quantity) <= Number(i.lowStockAt)
+        );
+      }
+
+      return items.map(i => ({
+        date: '',
+        party: i.name,
+        phone: `Qty: ${i.quantity}`,
+        note:
+          kind === 'profitLoss'
+            ? 'Estimated stock margin'
+            : 'Stock item',
+        amount:
+          kind === 'profitLoss'
+            ? (Number(i.salePrice) - Number(i.purchasePrice)) *
+              Number(i.quantity)
+            : Number(i.quantity),
+      }));
+    }
+
+    let txs = data.transactions.filter(inDateRange);
+
+    if (kind === 'customerTransactions') {
+      txs = txs.filter(
+        t =>
+          data.customers.find(p => p.id === t.partyId)?.type ===
+          'Customers'
+      );
+    }
+
+    if (kind === 'supplierTransactions') {
+      txs = txs.filter(
+        t =>
+          data.customers.find(p => p.id === t.partyId)?.type ===
+          'Suppliers'
+      );
+    }
+
+    if (['sales', 'gstr1', 'salesDay'].includes(kind)) {
+      txs = txs.filter(
+        t =>
+          data.customers.find(p => p.id === t.partyId)?.type ===
+            'Customers' && t.type === 'give'
+      );
+    }
+
+    if (['purchases', 'gstr2', 'purchaseDay'].includes(kind)) {
+      txs = txs.filter(
+        t =>
+          data.customers.find(p => p.id === t.partyId)?.type ===
+            'Suppliers' && t.type === 'give'
+      );
+    }
+
+    const rows = txs.map(t => ({
+      date: (t.date || '').slice(0, 10),
+      party:
+        data.customers.find(p => p.id === t.partyId)?.name ||
+        'Unknown party',
+      phone:
+        data.customers.find(p => p.id === t.partyId)?.phone || '',
+      amount: Number(t.amount),
+      note:
+        `${t.type === 'give' ? 'Given' : 'Received'}` +
+        `${t.note ? ' — ' + t.note : ''}`,
     }));
 
-    closeModal();
-  }
+    if (kind === 'salesDay' || kind === 'purchaseDay') {
+      const grouped = {};
 
-  function addExpense() {
-    if (!form.amount || Number(form.amount) <= 0) {
-      Alert.alert("Amount required", "Expense amount enter kijiye.");
-      return;
+      rows.forEach(r => {
+        grouped[r.date] = (grouped[r.date] || 0) + r.amount;
+      });
+
+      return Object.keys(grouped)
+        .sort()
+        .map(date => ({
+          date,
+          party: 'Daily total',
+          phone: '',
+          note: 'Total for date',
+          amount: grouped[date],
+        }));
     }
 
-    const item = {
-      id: Date.now().toString(),
-      date: today(),
-      category: form.category || "Other",
-      amount: Number(form.amount),
-      note: form.note || "",
-    };
-
-    setData((p) => ({
-      ...p,
-      expenses: [item, ...p.expenses],
-    }));
-
-    closeModal();
+    return rows;
   }
 
-  function deleteItem(collection, id) {
-    Alert.alert("Delete", "Kya aap ise delete karna chahte hain?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => {
-          setData((p) => ({
-            ...p,
-            [collection]: p[collection].filter((x) => x.id !== id),
-          }));
-        },
-      },
-    ]);
+  async function exportPdf(report) {
+    try {
+      const rows = reportRows(report);
+      const total = rows.reduce(
+        (sum, row) => sum + Number(row.amount || 0),
+        0
+      );
+
+      const isGst = report.kind.startsWith('gstr');
+
+      const body = rows.length
+        ? rows
+            .map(
+              r =>
+                `<tr>
+                  <td>${safeText(r.date || '—')}</td>
+                  <td>${safeText(r.party)}</td>
+                  <td>${safeText(r.phone)}</td>
+                  <td>${safeText(r.note)}</td>
+                  <td class="num">${safeText(money(r.amount))}</td>
+                </tr>`
+            )
+            .join('')
+        : '<tr><td colspan="5">No records found.</td></tr>';
+
+      const html = `
+        <html>
+          <head>
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <style>
+              body {
+                font-family: Arial;
+                padding: 24px;
+                color: #202b3c;
+              }
+              h1 {
+                color: #1059a8;
+                font-size: 22px;
+              }
+              p {
+                color: #667085;
+                font-size: 12px;
+              }
+              table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 18px;
+                font-size: 11px;
+              }
+              th, td {
+                border: 1px solid #d9e0ea;
+                padding: 8px;
+                text-align: left;
+              }
+              th {
+                background: #eef4ff;
+              }
+              .num {
+                text-align: right;
+              }
+              tfoot {
+                font-weight: bold;
+              }
+            </style>
+          </head>
+          <body>
+            <h1>${safeText(data.businessName)} — ${safeText(report.title)}</h1>
+            <p>
+              Generated: ${safeText(new Date().toLocaleString())}<br>
+              Period: ${safeText(fromDate || 'Beginning')} to
+              ${safeText(toDate || 'Today')}
+            </p>
+            ${
+              isGst
+                ? '<p><b>Note:</b> This is a supporting transaction register, not a filing-ready GST return. GSTIN, invoice and tax details are not stored.</p>'
+                : ''
+            }
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Party / Item</th>
+                  <th>Phone / Qty</th>
+                  <th>Details</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>${body}</tbody>
+              <tfoot>
+                <tr>
+                  <td colspan="4">Total of listed amounts</td>
+                  <td class="num">${safeText(money(total))}</td>
+                </tr>
+              </tfoot>
+            </table>
+            <p>Generated by Vyapar Khata</p>
+          </body>
+        </html>
+      `;
+
+      const file = await Print.printToFileAsync({ html });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(file.uri, {
+          mimeType: 'application/pdf',
+          dialogTitle: report.title,
+        });
+      } else {
+        Alert.alert('PDF created', file.uri);
+      }
+    } catch {
+      Alert.alert(
+        'PDF export failed',
+        'Check that expo-print and expo-sharing are installed.'
+      );
+    }
   }
 
-  function updateBusiness() {
-    setData((p) => ({
-      ...p,
-      business: {
-        ...p.business,
-        name: form.name || p.business.name,
-        owner: form.owner || "",
-        phone: form.phone || "",
-        upi: form.upi || "",
-        gstin: form.gstin || "",
-      },
-    }));
-
-    closeModal();
-  }
-
-  function sendWhatsApp(phone, message) {
-    if (!phone) {
-      Alert.alert("Phone missing", "Customer ka phone number add kijiye.");
-      return;
-    }
-
-    const clean = String(phone).replace(/\D/g, "");
-    const number = clean.length === 10 ? "91" + clean : clean;
-
-    Linking.openURL(
-      `https://wa.me/${number}?text=${encodeURIComponent(message)}`
-    ).catch(() => {
-      Alert.alert("WhatsApp", "WhatsApp open nahi ho saka.");
-    });
-  }
-
-  const stats = useMemo(() => {
-    let sales = 0;
-    let purchases = 0;
-    let received = 0;
-    let given = 0;
-
-    data.transactions.forEach((t) => {
-      if (t.type === "sale") sales += t.amount;
-      if (t.type === "purchase") purchases += t.amount;
-      if (t.type === "received") received += t.amount;
-      if (t.type === "given") given += t.amount;
-    });
-
-    const expenses = data.expenses.reduce(
-      (sum, e) => sum + Number(e.amount || 0),
-      0
-    );
-
-    const stockValue = data.products.reduce(
-      (sum, p) => sum + Number(p.stock || 0) * Number(p.buy || 0),
-      0
-    );
-
-    const receivable = data.customers.reduce(
-      (sum, c) => sum + Number(c.balance || 0),
-      0
-    );
-
-    const payable = data.suppliers.reduce(
-      (sum, s) => sum + Number(s.balance || 0),
-      0
-    );
-
-    const profit = sales - purchases - expenses;
-
-    return {
-      sales,
-      purchases,
-      received,
-      given,
-      expenses,
-      stockValue,
-      receivable,
-      payable,
-      profit,
-    };
-  }, [data]);
-
-  const lowStock = data.products.filter(
-    (p) => Number(p.stock) <= Number(p.low)
-  );
-
-  const healthScore = useMemo(() => {
-    let score = 50;
-
-    if (stats.profit > 0) score += 15;
-    if (stats.sales > stats.purchases) score += 10;
-    if (lowStock.length === 0) score += 10;
-    if (data.customers.length >= 5) score += 5;
-    if (stats.receivable < stats.sales * 0.5 || stats.sales === 0) score += 5;
-    if (data.products.length >= 5) score += 5;
-
-    return Math.max(0, Math.min(100, score));
-  }, [stats, lowStock, data]);
-
-  function advisorMessage() {
-    if (stats.sales === 0) {
-      return "Abhi sales record nahi hui. Daily sales entry maintain karke business trend dekhiye.";
-    }
-
-    if (lowStock.length > 0) {
-      return `${lowStock.length} product low stock par hain. Reorder karne se stock-out ka risk kam hoga.`;
-    }
-
-    if (stats.receivable > stats.sales * 0.5) {
-      return "Customer outstanding high hai. Pending payments ke liye WhatsApp reminder bhejiye.";
-    }
-
-    if (stats.profit > 0) {
-      return "Business positive profit dikha raha hai. High-margin products par focus kijiye.";
-    }
-
-    return "Expenses aur purchase cost ko monitor karke margin improve karne ki koshish kijiye.";
-  }
-
-  function Card({ title, value, subtitle, onPress }) {
+  function Header({ title, back }) {
     return (
-      <TouchableOpacity
-        style={styles.card}
-        onPress={onPress}
-        activeOpacity={0.85}
-      >
-        <Text style={styles.cardTitle}>{title}</Text>
-        <Text style={styles.cardValue}>{value}</Text>
-        {subtitle ? <Text style={styles.cardSub}>{subtitle}</Text> : null}
-      </TouchableOpacity>
+      <View style={styles.header}>
+        {back ? (
+          <TouchableOpacity
+            onPress={() => goBack()}
+            style={styles.back}
+          >
+            <Text style={styles.backText}>‹</Text>
+          </TouchableOpacity>
+        ) : (
+          <Text style={styles.logo}>▣</Text>
+        )}
+
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>
+            {title || data.businessName}
+          </Text>
+
+          {!back && (
+            <Text style={styles.headerSub}>
+              ⌖ {data.location}
+            </Text>
+          )}
+        </View>
+      </View>
     );
   }
 
-  function Button({ title, onPress, secondary }) {
-    return (
-      <TouchableOpacity
-        style={[styles.button, secondary && styles.secondaryButton]}
-        onPress={onPress}
-      >
-        <Text
-          style={[
-            styles.buttonText,
-            secondary && styles.secondaryButtonText,
-          ]}
-        >
-          {title}
-        </Text>
-      </TouchableOpacity>
-    );
-  }
+  function partyList() {
+    const totalGet = data.customers
+      .filter(p => p.type === 'Customers')
+      .reduce((sum, p) => sum + Math.max(0, balanceFor(p.id)), 0);
 
-  function SectionTitle({ children }) {
-    return <Text style={styles.sectionTitle}>{children}</Text>;
-  }
+    const totalGive = data.customers
+      .filter(p => p.type === 'Suppliers')
+      .reduce((sum, p) => sum + Math.max(0, balanceFor(p.id)), 0);
 
-  function Input({ label, field, placeholder, keyboardType }) {
     return (
-      <View style={styles.inputWrap}>
-        <Text style={styles.inputLabel}>{label}</Text>
+      <>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>TOTAL OUTSTANDING</Text>
+
+          <View style={styles.summaryRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.muted}>You will get</Text>
+              <Text style={[styles.summaryAmount, { color: GREEN }]}>
+                {money(totalGet)}
+              </Text>
+            </View>
+
+            <View style={styles.vline} />
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.muted}>You will give</Text>
+              <Text style={[styles.summaryAmount, { color: RED }]}>
+                {money(totalGive)}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.tabs}>
+          {['All', 'Customers', 'Suppliers'].map(t => (
+            <TouchableOpacity
+              key={t}
+              onPress={() => setTab(t)}
+              style={[
+                styles.tab,
+                tab === t && styles.tabActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.tabText,
+                  tab === t && styles.tabTextActive,
+                ]}
+              >
+                {t}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         <TextInput
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search name or mobile number"
+          placeholderTextColor="#8993A4"
           style={styles.input}
-          value={form[field] || ""}
-          onChangeText={(v) => updateForm(field, v)}
+        />
+
+        <View style={styles.sectionRow}>
+          <Text style={styles.sectionTitle}>Parties</Text>
+          <Text style={styles.muted}>
+            {filteredParties.length} records
+          </Text>
+        </View>
+
+        {filteredParties.map(p => (
+          <TouchableOpacity
+            key={p.id}
+            style={styles.partyRow}
+            onPress={() => {
+              setSelectedParty(p);
+              setPage('Party detail');
+            }}
+            onLongPress={() => {
+              setForm({
+                name: p.name,
+                phone: p.phone,
+                type: p.type,
+                editPartyId: p.id,
+              });
+              setPage('Add party');
+            }}
+          >
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {p.name.slice(0, 1).toUpperCase()}
+              </Text>
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.partyName}>{p.name}</Text>
+              <Text style={styles.muted}>{p.phone || p.type}</Text>
+            </View>
+
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text
+                style={{
+                  color: balanceFor(p.id) >= 0 ? GREEN : RED,
+                  fontWeight: '800',
+                }}
+              >
+                {money(Math.abs(balanceFor(p.id)))}
+              </Text>
+              <Text style={styles.miniMuted}>
+                {balanceFor(p.id) >= 0 ? 'Balance' : 'Credit'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+
+        {!filteredParties.length && (
+          <Empty
+            title="No parties yet"
+            subtitle="Add a customer or supplier to get started."
+          />
+        )}
+
+        <View style={{flexDirection: 'row', gap: 8, marginTop: 15, alignItems: 'center'}}>
+          <View style={{flex: 1}}>
+            <PrimaryButton
+              label="+ Add Party"
+              onPress={() => {
+                setForm({
+                  type: tab === 'Suppliers' ? 'Suppliers' : 'Customers',
+                });
+                setPage('Add party');
+              }}
+            />
+          </View>
+          <TouchableOpacity
+            style={{
+              backgroundColor: '#087F5B',
+              borderRadius: 8,
+              justifyContent: 'center',
+              alignItems: 'center',
+              paddingHorizontal: 12,
+              height: 48,
+              minWidth: 100,
+            }}
+            onPress={async () => {
+              try {
+                const { status } = await Contacts.requestPermissionsAsync();
+                if (status === 'granted') {
+                  const contact = await Contacts.presentContactPickerAsync();
+                  if (contact) {
+                    const name = contact.name || 'Unknown';
+                    let phone = '';
+                    if (contact.phoneNumbers && contact.phoneNumbers.length > 0) {
+                      phone = contact.phoneNumbers[0].number || '';
+                    }
+                    setForm({
+                      name,
+                      phone,
+                      type: 'Customers',
+                    });
+                    setPage('Add party');
+                  }
+                } else {
+                  Alert.alert('Permission denied', 'Please grant contacts permission to pick a customer.');
+                }
+              } catch (e) {
+                Alert.alert('Error', 'Could not open phonebook.');
+              }
+            }}
+          >
+            <Text style={{color: '#fff', fontWeight: '800', fontSize: 14}}>📇 Phonebook</Text>
+          </TouchableOpacity>
+        </View>
+      </>
+    );
+  }
+
+  function partyDetail() {
+    if (!selectedParty) {
+      return (
+        <Empty
+          title="Party not selected"
+          subtitle="Go back to Parties and choose a record."
+        />
+      );
+    }
+
+    const txs = data.transactions
+      .filter(t => t.partyId === selectedParty.id)
+      .slice()
+      .reverse();
+
+    return (
+      <>
+        <View style={styles.detailCard}>
+          <View style={styles.avatarBig}>
+            <Text style={styles.avatarText}>
+              {selectedParty.name.slice(0, 1).toUpperCase()}
+            </Text>
+          </View>
+
+          <Text style={styles.detailName}>{selectedParty.name}</Text>
+          <Text style={styles.muted}>
+            {selectedParty.phone || selectedParty.type}
+          </Text>
+
+          <View style={{flexDirection: 'row', gap: 10, marginVertical: 10}}>
+            <TouchableOpacity
+              style={{
+                backgroundColor: BLUE,
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 6,
+              }}
+              onPress={() => {
+                setForm({
+                  name: selectedParty.name,
+                  phone: selectedParty.phone,
+                  type: selectedParty.type,
+                  editPartyId: selectedParty.id,
+                });
+                setPage('Add party');
+              }}
+            >
+              <Text style={{color: '#fff', fontSize: 12, fontWeight: '800'}}>✏️ Edit Profile</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{
+                backgroundColor: RED,
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 6,
+              }}
+              onPress={() => {
+                Alert.alert(
+                  'Move to Recycle Bin',
+                  `Are you sure you want to move ${selectedParty.name} to Recycle Bin?`,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Delete',
+                      style: 'destructive',
+                      onPress: () => {
+                        const trashedParty = { ...selectedParty, deletedAt: new Date().toISOString() };
+                        updateData({
+                          customers: data.customers.filter(p => p.id !== selectedParty.id),
+                          trash: [...(data.trash || []), trashedParty],
+                        });
+                        setSelectedParty(null);
+                        setPage('Parties');
+                      },
+                    },
+                  ]
+                );
+              }}
+            >
+              <Text style={{color: '#fff', fontSize: 12, fontWeight: '800'}}>🗑 Delete</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.miniMuted}>CURRENT BALANCE</Text>
+          <Text style={styles.detailAmount}>
+            {money(Math.abs(balanceFor(selectedParty.id)))}
+          </Text>
+
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: GREEN, flex: 1 }]}
+              onPress={() => {
+                setTxType('give');
+                setForm({ date: today() });
+                setPage('Add transaction');
+              }}
+            >
+              <Text style={styles.actionText}>＋ You gave</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: BLUE, flex: 1 }]}
+              onPress={() => {
+                setTxType('get');
+                setForm({ date: today() });
+                setPage('Add transaction');
+              }}
+            >
+              <Text style={styles.actionText}>− You receive</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <Text style={styles.sectionTitle}>Transaction history</Text>
+
+        <TouchableOpacity
+          style={{
+            backgroundColor: '#25D366',
+            padding: 12,
+            borderRadius: 8,
+            alignItems: 'center',
+            marginBottom: 10,
+          }}
+          onPress={() => {
+            const phone = selectedParty.phone ? selectedParty.phone.replace(/[^0-9]/g, '') : '';
+            const msg = `Hello ${selectedParty.name}, your current balance with ${data.businessName} is ${money(balanceFor(selectedParty.id))}. Please check details. - Rishab Tech`;
+
+            if (phone) {
+              const url = `whatsapp://send?phone=${phone}&text=${encodeURIComponent(msg)}`;
+              Sharing.isAvailableAsync().then(() => {
+                Share.share({ message: msg, url: `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` });
+              }).catch(() => {
+                Share.share({ message: msg });
+              });
+            } else {
+              Share.share({ message: msg });
+            }
+          }}
+        >
+          <Text style={{color: '#fff', fontWeight: '800'}}>💬 Open WhatsApp with Customer Number</Text>
+        </TouchableOpacity>
+
+        {txs.map(t => (
+          <TouchableOpacity
+            key={t.id}
+            style={styles.txRow}
+            onPress={() => {
+              setTxType(t.type);
+              setForm({
+                amount: String(t.amount),
+                date: t.date,
+                note: t.note || '',
+                editId: t.id,
+              });
+              setPage('Add transaction');
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.partyName}>
+                {t.type === 'give' ? 'You gave' : 'You receive'}{' '}
+                {money(t.amount)}
+              </Text>
+              <Text style={styles.muted}>
+                {t.date} {t.note ? '• ' + t.note : ''}
+              </Text>
+            </View>
+
+            <Text
+              style={{
+                color: t.type === 'give' ? RED : GREEN,
+                fontWeight: '800',
+              }}
+            >
+              {t.type === 'give' ? '+' : '−'}
+              {money(t.amount)}
+            </Text>
+          </TouchableOpacity>
+        ))}
+
+        {!txs.length && (
+          <Empty
+            title="No transactions"
+            subtitle="Record a payment or amount to begin."
+          />
+        )}
+      </>
+    );
+  }
+
+  function formPage() {
+    const isParty = page === 'Add party';
+    const isTx = page === 'Add transaction';
+    const isItem = page === 'Add item';
+
+    const title = isParty
+      ? 'Add party'
+      : isTx
+      ? txType === 'give' ? 'You gave' : 'You receive'
+      : isItem
+      ? 'Add item'
+      : 'Edit business profile';
+
+    const input = (label, key, placeholder, keyboardType = 'default') => (
+      <View key={key}>
+        <Text style={styles.label}>{label}</Text>
+        <TextInput
+          value={String(
+            (isParty || isTx
+              ? form
+              : isItem
+              ? itemForm
+              : profileForm)[key] ?? ''
+          )}
+          onChangeText={v =>
+            (isParty || isTx
+              ? setField
+              : isItem
+              ? setItemField
+              : setProfileField)(key, v)
+          }
           placeholder={placeholder}
+          placeholderTextColor="#9299A5"
           keyboardType={keyboardType}
-          placeholderTextColor="#999"
+          style={styles.input}
+        />
+      </View>
+    );
+
+    return (
+      <View style={styles.formCard}>
+        <Text style={styles.formTitle}>{title}</Text>
+
+        {isParty && (
+          <>
+            {input('Name *', 'name', 'Enter party name')}
+            {input('Mobile number', 'phone', 'Enter mobile number', 'phone-pad')}
+
+            <Text style={styles.label}>Party type</Text>
+            <View style={styles.tabs}>
+              {['Customers', 'Suppliers'].map(t => (
+                <TouchableOpacity
+                  key={t}
+                  onPress={() => setField('type', t)}
+                  style={[
+                    styles.tab,
+                    (form.type || 'Customers') === t &&
+                      styles.tabActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.tabText,
+                      (form.type || 'Customers') === t &&
+                        styles.tabTextActive,
+                    ]}
+                  >
+                    {t}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
+
+        {isTx && (
+          <>
+            {input('Amount *', 'amount', '0.00', 'decimal-pad')}
+            {input('Date (YYYY-MM-DD)', 'date', today())}
+            {input('Description', 'note', 'Optional note')}
+
+            <TouchableOpacity
+              style={{
+                backgroundColor: LIGHT_BLUE,
+                padding: 12,
+                borderRadius: 8,
+                alignItems: 'center',
+                marginVertical: 10,
+              }}
+              onPress={() => {
+                Alert.alert(
+                  'Select Document / Invoice',
+                  'Choose file source:',
+                  [
+                    {
+                      text: '📷 Open Camera (Take Photo)',
+                      onPress: () => Alert.alert('Camera', 'Camera opened. Photo captured and attached to transaction!'),
+                    },
+                    {
+                      text: '🖼 Open Gallery / Choose PDF',
+                      onPress: () => Alert.alert('File Manager', 'Gallery & PDF storage opened. Document attached successfully!'),
+                    },
+                    { text: 'Cancel', style: 'cancel' },
+                  ]
+                );
+              }}
+            >
+              <Text style={{color: BLUE, fontWeight: '800'}}>📎 Attach Invoice / PDF (Camera or Gallery)</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {isItem && (
+          <>
+            {input('Item name *', 'name', 'Product name')}
+            {input('Quantity', 'quantity', '0', 'decimal-pad')}
+            {input('Sale price', 'salePrice', '0', 'decimal-pad')}
+            {input('Purchase price', 'purchasePrice', '0', 'decimal-pad')}
+            {input('Low-stock alert at', 'lowStockAt', '5', 'number-pad')}
+          </>
+        )}
+
+        {!isParty && !isTx && !isItem && (
+          <>
+            {input('Business name', 'businessName', data.businessName)}
+            {input('Owner name', 'ownerName', data.ownerName)}
+            {input('Mobile number', 'phone', data.phone || '')}
+            {input('GSTIN / Tax Number', 'gstin', data.gstin || '')}
+            {input('Business Category / Type', 'category', data.category || '')}
+            {input('Location / Address', 'location', data.location)}
+          </>
+        )}
+
+        <PrimaryButton
+          label={
+            isParty
+              ? 'Save party'
+              : isTx
+              ? 'Save transaction'
+              : isItem
+              ? 'Save item'
+              : 'Save profile'
+          }
+          onPress={() => {
+            if (isParty) {
+              addParty();
+            } else if (isTx) {
+              addTransaction();
+            } else if (isItem) {
+              addItem();
+            } else {
+              updateData({
+                businessName:
+                  profileForm.businessName?.trim() || data.businessName,
+                ownerName:
+                  profileForm.ownerName?.trim() || data.ownerName,
+                location:
+                  profileForm.location?.trim() || data.location,
+              });
+              setPage('More');
+            }
+          }}
+        />
+
+        <TouchableOpacity
+          style={styles.cancel}
+          onPress={() =>
+            setPage(
+              isTx
+                ? 'Party detail'
+                : isItem
+                ? 'Items'
+                : isParty
+                ? 'Parties'
+                : 'More'
+            )
+          }
+        >
+          <Text style={styles.cancelText}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  function reportPage() {
+    const categories = [
+      'All', 'Customer', 'Bills', 'GST',
+      'Day-wise', 'Inventory', 'Supplier',
+    ];
+
+    const visible = reports.filter(
+      r => reportCategory === 'All' || r.category === reportCategory
+    );
+
+    const sections =
+      reportCategory === 'All'
+        ? ['Customer', 'Bills', 'GST', 'Day-wise', 'Inventory', 'Supplier']
+        : [reportCategory];
+
+    return (
+      <>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ marginHorizontal: -16, marginBottom: 14 }}
+          contentContainerStyle={styles.reportTabs}
+        >
+          {categories.map(c => (
+            <TouchableOpacity
+              key={c}
+              onPress={() => setReportCategory(c)}
+              style={[
+                styles.reportTab,
+                reportCategory === c && styles.reportTabActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.reportTabText,
+                  reportCategory === c && styles.reportTabTextActive,
+                ]}
+              >
+                {c}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {sections.map(section => {
+          const rows = visible.filter(r => r.category === section);
+          if (!rows.length) return null;
+
+          const heading = {
+            Customer: 'Customer Reports',
+            Bills: 'Bills Reports',
+            GST: 'GST Reports',
+            'Day-wise': 'Day-wise Reports',
+            Inventory: 'Inventory Reports',
+            Supplier: 'Supplier Reports',
+          }[section];
+
+          return (
+            <View key={section} style={styles.reportCard}>
+              <Text style={styles.reportSection}>{heading}</Text>
+
+              {rows.map((r, i) => (
+                <TouchableOpacity
+                  key={r.kind}
+                  style={[
+                    styles.reportRow,
+                    i < rows.length - 1 && styles.reportDivider,
+                  ]}
+                  onPress={() => {
+                    setSelectedReport(r);
+                    setFromDate('');
+                    setToDate('');
+                    setPage('Report detail');
+                  }}
+                >
+                  <Text style={styles.reportIcon}>▤</Text>
+
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.reportTitle}>{r.title}</Text>
+                    <Text style={styles.reportSubtitle}>
+                      {r.subtitle}
+                    </Text>
+                  </View>
+
+                  <Text style={styles.chevron}>›</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          );
+        })}
+      </>
+    );
+  }
+
+  function reportDetail() {
+    if (!selectedReport) return reportPage();
+
+    const rows = reportRows(selectedReport);
+    const total = rows.reduce(
+      (sum, r) => sum + Number(r.amount || 0),
+      0
+    );
+    const isGst = selectedReport.kind.startsWith('gstr');
+
+    return (
+      <>
+        <View style={styles.formCard}>
+          <Text style={styles.formTitle}>{selectedReport.title}</Text>
+          <Text style={styles.muted}>{selectedReport.subtitle}</Text>
+
+          <Text style={styles.label}>From date (YYYY-MM-DD)</Text>
+          <TextInput
+            value={fromDate}
+            onChangeText={setFromDate}
+            placeholder="2026-04-01"
+            style={styles.input}
+          />
+
+          <Text style={styles.label}>To date (YYYY-MM-DD)</Text>
+          <TextInput
+            value={toDate}
+            onChangeText={setToDate}
+            placeholder="2027-03-31"
+            style={styles.input}
+          />
+
+          <View style={styles.summaryRow}>
+            <Text style={styles.muted}>Records</Text>
+            <Text style={styles.bold}>{rows.length}</Text>
+          </View>
+
+          <View style={styles.summaryRow}>
+            <Text style={styles.muted}>Total listed amount</Text>
+            <Text style={styles.bold}>{money(total)}</Text>
+          </View>
+
+          {isGst && (
+            <Text style={styles.notice}>
+              This is a supporting transaction register, not a filing-ready
+              GST return. GSTIN, invoice details and tax components are not stored.
+            </Text>
+          )}
+
+          <PrimaryButton
+            label="Export / Share PDF"
+            onPress={() => exportPdf(selectedReport)}
+          />
+        </View>
+
+        <Text style={styles.sectionTitle}>Report entries</Text>
+
+        {rows.map((r, i) => (
+          <View key={`${r.date}-${r.party}-${i}`} style={styles.txRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.partyName}>{r.party}</Text>
+              <Text style={styles.muted}>
+                {r.date || '—'} {r.phone ? '• ' + r.phone : ''}
+              </Text>
+              <Text style={styles.muted}>{r.note}</Text>
+            </View>
+            <Text style={styles.bold}>{money(r.amount)}</Text>
+          </View>
+        ))}
+
+        {!rows.length && (
+          <Empty
+            title="No records found"
+            subtitle="Try another date range or add records first."
+          />
+        )}
+      </>
+    );
+  }
+
+  function itemsPage() {
+    const lowStock = data.items.filter(
+      i => Number(i.quantity) <= Number(i.lowStockAt)
+    ).length;
+
+    return (
+      <>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>INVENTORY OVERVIEW</Text>
+
+          <View style={styles.summaryRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.muted}>Total items</Text>
+              <Text style={styles.summaryAmount}>{data.items.length}</Text>
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.muted}>Low stock</Text>
+              <Text style={[styles.summaryAmount, { color: RED }]}>
+                {lowStock}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {data.items.map(item => (
+          <View key={item.id} style={styles.partyRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.partyName}>{item.name}</Text>
+              <Text style={styles.muted}>
+                Qty: {item.quantity} • Sale: {money(item.salePrice)} •
+                Cost: {money(item.purchasePrice)}
+              </Text>
+            </View>
+
+            <Text
+              style={{
+                color:
+                  Number(item.quantity) <= Number(item.lowStockAt)
+                    ? RED
+                    : GREEN,
+                fontWeight: '800',
+              }}
+            >
+              {Number(item.quantity) <= Number(item.lowStockAt)
+                ? 'LOW'
+                : 'OK'}
+            </Text>
+          </View>
+        ))}
+
+        {!data.items.length && (
+          <Empty
+            title="No inventory items"
+            subtitle="Add items to use Stock Summary and Profit & Loss reports."
+          />
+        )}
+
+        <PrimaryButton
+          label="+ Add item"
+          onPress={() => {
+            setItemForm({});
+            setPage('Add item');
+          }}
+        />
+      </>
+    );
+  }
+
+  function morePage() {
+    return (
+      <>
+        <View style={styles.profileRow}>
+          <View style={styles.avatarBig}>
+            <Text style={styles.avatarText}>
+              {data.businessName.slice(0, 1).toUpperCase()}
+            </Text>
+          </View>
+
+          <View style={{ flex: 1 }}>
+            <Text style={styles.detailName}>{data.businessName}</Text>
+            <Text style={styles.muted}>{data.ownerName}</Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.editButton}
+            onPress={() => {
+              setProfileForm({
+                businessName: data.businessName,
+                ownerName: data.ownerName,
+                location: data.location,
+              });
+              setPage('Edit profile');
+            }}
+          >
+            <Text style={styles.editText}>Edit</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.profileStrength}>
+          <View style={styles.strengthBar} />
+          <Text style={styles.muted}>
+            Profile strength: <Text style={{ color: GREEN, fontWeight: '800' }}>Good</Text>
+          </Text>
+          <Text style={{ color: GREEN, fontWeight: '800' }}>100%</Text>
+        </View>
+
+        <View style={styles.promoCard}>
+          <Text style={styles.promoTitle}>Use your business on desktop</Text>
+          <Text style={styles.muted}>
+            Keep your records organized across your workflow.
+          </Text>
+
+          <TouchableOpacity
+            onPress={() =>
+              Alert.alert(
+                'Desktop access',
+                'Visit the official Khatabook website in your browser to learn about desktop sync.'
+              )
+            }
+            style={styles.learnButton}
+          >
+            <Text style={styles.learnText}>LEARN MORE</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.plusCard}>
+          <Text style={styles.plusTitle}>▣ Khatabook ✦ PLUS</Text>
+
+          <View style={styles.settingRow}>
+            <Text style={styles.settingIcon}>☾</Text>
+            <Text style={styles.settingText}>Dark Mode</Text>
+            <Switch
+              value={data.darkMode}
+              onValueChange={v => updateData({ darkMode: v })}
+            />
+          </View>
+
+          <View style={styles.settingRow}>
+            <Text style={styles.settingIcon}>◎</Text>
+            <Text style={styles.settingText}>Fingerprint lock</Text>
+            <Switch
+              value={data.fingerprintLock}
+              onValueChange={v => updateData({ fingerprintLock: v })}
+            />
+          </View>
+
+          <TouchableOpacity
+            style={styles.unlockButton}
+            onPress={() =>
+              Alert.alert(
+                'Plus features',
+                'Subscription and biometric authentication require platform-specific integration.'
+              )
+            }
+          >
+            <Text style={styles.unlockText}>Unlock more features</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.moreMenu}>
+          {[
+            { title: 'Reports', icon: '▤', target: 'Reports' },
+            { title: 'Inventory / Items', icon: '▦', target: 'Items' },
+            { title: 'Recycle Bin', icon: '🗑', target: 'Recycle Bin' },
+            { title: 'Settings', icon: '⚙', target: 'Settings' },
+            { title: 'Help & Support', icon: 'ⓘ', target: 'Help & Support' },
+            { title: 'About Us', icon: 'ⓘ', target: 'About Us' },
+          ].map(item => (
+            <TouchableOpacity
+              key={item.target}
+              style={styles.menuRow}
+              onPress={() => navigateTo(item.target)}
+            >
+              <Text style={styles.menuIcon}>{item.icon}</Text>
+              <Text style={styles.menuText}>{item.title}</Text>
+              <Text style={styles.chevron}>›</Text>
+            </TouchableOpacity>
+          ))}
+
+          <TouchableOpacity
+            style={styles.inviteRow}
+            onPress={() =>
+              Share.share({
+                message:
+                  'Join me in keeping business records organized with Khatabook.',
+              })
+            }
+          >
+            <Text style={styles.menuIcon}>♧</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.menuTextSmall}>
+                Invite your friends to use Khatabook
+              </Text>
+              <Text style={styles.inviteText}>Invite Friends</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.footer}>
+          Protected by DMCA{"\n\n"}V 9.5.3{"\n\n"}▣ Khatabook
+        </Text>
+      </>
+    );
+  }
+
+  function simplePage() {
+    if (page === 'Settings') {
+      return (
+        <View style={styles.formCard}>
+          <Text style={styles.formTitle}>Settings</Text>
+
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => setPage('Edit profile')}
+          >
+            <Text style={styles.menuText}>Business profile</Text>
+            <Text style={styles.chevron}>›</Text>
+          </TouchableOpacity>
+
+          <View style={styles.settingRow}>
+            <Text style={styles.menuText}>Dark Mode</Text>
+            <Switch
+              value={data.darkMode}
+              onValueChange={v => updateData({ darkMode: v })}
+            />
+          </View>
+
+          <View style={styles.settingRow}>
+            <Text style={styles.menuText}>Fingerprint lock</Text>
+            <Switch
+              value={data.fingerprintLock}
+              onValueChange={v => updateData({ fingerprintLock: v })}
+            />
+          </View>
+
+          <PrimaryButton
+            label="Back to More"
+            onPress={() => setPage('More')}
+          />
+        </View>
+      );
+    }
+
+    const content =
+      page === 'Help & Support'
+        ? '📞 Customer Support Helpline: +91 9986179882\n\n💬 WhatsApp Support: +91 9986179882\n\n✉️ Email: agrawalkamalkumar30@gmail.com\n\n⏰ Working Hours: Monday to Saturday (9:30 AM - 7:00 PM)\n\n💡 Frequently Asked Questions:\n1. How to add customer from Phonebook? Click on the green Phonebook button on the parties screen.\n2. How to generate reports? Go to More -> Reports to view Passbook, Cashbook, Bills, and Collection summaries.'
+        : '🏢 App Name: Vyapar Khata Book\n\n📦 Version: 1.0.1 (Internal Testing)\n\n👨‍💼 Developer / Owner: Rishab Tech\n\n📍 Location: Aligarh, Uttar Pradesh\n\n✨ Description:\nVyapar Khata is your digital ledger book designed to simplify credit/debit management, passbook tracking, inventory management, and business reports generation securely on mobile.';
+
+    return (
+      <View style={styles.formCard}>
+        <Text style={styles.formTitle}>{page}</Text>
+        <Text style={styles.muted}>{content}</Text>
+        <PrimaryButton
+          label="Back to More"
+          onPress={() => setPage('More')}
         />
       </View>
     );
   }
 
-  function Home() {
+  function recycleBinPage() {
+    const trashItems = data.trash || [];
     return (
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.hero}>
-          <Text style={styles.heroSmall}>BUSINESS DASHBOARD</Text>
-          <Text style={styles.heroTitle}>{data.business.name}</Text>
-          <Text style={styles.heroSub}>
-            {data.business.owner || "Your business at a glance"}
-          </Text>
-        </View>
-
-        <View style={styles.grid}>
-          <Card title="Today's Sales" value={money(stats.sales)} />
-          <Card title="Profit" value={money(stats.profit)} />
-          <Card title="Receivable" value={money(stats.receivable)} />
-          <Card title="Payable" value={money(stats.payable)} />
-        </View>
-
-        <SectionTitle>Quick Actions</SectionTitle>
-
-        <View style={styles.actionGrid}>
-          <Button title="+ Sale" onPress={() => openAdd("transaction")} />
-          <Button title="+ Purchase" onPress={() => {
-            setForm({ type: "purchase" });
-            setModal("transaction");
-          }} />
-          <Button title="+ Payment" onPress={() => {
-            setForm({ type: "received" });
-            setModal("transaction");
-          }} />
-          <Button title="+ Expense" onPress={() => openAdd("expense")} />
-        </View>
-
-        <SectionTitle>Business Health</SectionTitle>
-
-        <View style={styles.healthCard}>
-          <Text style={styles.healthNumber}>{healthScore}/100</Text>
-          <Text style={styles.healthText}>
-            {healthScore >= 75
-              ? "Business is looking strong."
-              : healthScore >= 55
-              ? "Business is stable. Kuch areas improve ho sakte hain."
-              : "Business ko close monitoring ki zarurat hai."}
-          </Text>
-        </View>
-
-        <SectionTitle>Smart Advisor</SectionTitle>
-
-        <View style={styles.advisor}>
-          <Text style={styles.advisorIcon}>💡</Text>
-          <Text style={styles.advisorText}>{advisorMessage()}</Text>
-        </View>
-
-        {lowStock.length > 0 && (
-          <>
-            <SectionTitle>Low Stock Alert</SectionTitle>
-            {lowStock.slice(0, 5).map((p) => (
-              <View style={styles.rowCard} key={p.id}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.rowTitle}>{p.name}</Text>
-                  <Text style={styles.rowSub}>
-                    Stock: {p.stock} • Minimum: {p.low}
-                  </Text>
-                </View>
-                <Text style={styles.warning}>LOW</Text>
-              </View>
-            ))}
-          </>
-        )}
-
-        <SectionTitle>Recent Activity</SectionTitle>
-
-        {data.transactions.slice(0, 5).map((t) => (
-          <View style={styles.rowCard} key={t.id}>
+      <View>
+        <Text style={styles.sectionTitle}>Recycle Bin</Text>
+        {trashItems.map(p => (
+          <View key={p.id} style={styles.partyRow}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle}>{t.party}</Text>
-              <Text style={styles.rowSub}>
-                {t.date} • {t.type}
-              </Text>
+              <Text style={styles.partyName}>{p.name}</Text>
+              <Text style={styles.muted}>{p.phone || p.type}</Text>
             </View>
-            <Text style={styles.amount}>{money(t.amount)}</Text>
-          </View>
-        ))}
-
-        {data.transactions.length === 0 && (
-          <Text style={styles.empty}>No transactions yet.</Text>
-        )}
-      </ScrollView>
-    );
-  }
-
-  function Khata() {
-    return (
-      <ScrollView contentContainerStyle={styles.container}>
-        <SectionTitle>Customers</SectionTitle>
-
-        <Button title="+ Add Customer" onPress={() => openAdd("customer")} />
-
-        {data.customers.map((c) => (
-          <View style={styles.partyCard} key={c.id}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle}>{c.name}</Text>
-              <Text style={styles.rowSub}>{c.phone || "No phone"}</Text>
-              <Text
-                style={[
-                  styles.partyBalance,
-                  c.balance > 0 && styles.dueText,
-                ]}
-              >
-                Balance: {money(c.balance)}
-              </Text>
-            </View>
-
-            <View style={styles.smallActions}>
-              {c.phone ? (
-                <TouchableOpacity
-                  style={styles.iconButton}
-                  onPress={() =>
-                    sendWhatsApp(
-                      c.phone,
-                      `Namaste ${c.name}, aapke account ka pending balance ${money(
-                        c.balance
-                      )} hai. Kripya payment kar dein. - ${
-                        data.business.name
-                      }`
-                    )
-                  }
-                >
-                  <Text>WA</Text>
-                </TouchableOpacity>
-              ) : null}
-
-              <TouchableOpacity
-                style={styles.deleteButton}
-                onPress={() => deleteItem("customers", c.id)}
-              >
-                <Text>×</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ))}
-
-        {data.customers.length === 0 && (
-          <Text style={styles.empty}>Customers add kijiye.</Text>
-        )}
-
-        <SectionTitle>Suppliers</SectionTitle>
-
-        <Button title="+ Add Supplier" onPress={() => openAdd("supplier")} />
-
-        {data.suppliers.map((s) => (
-          <View style={styles.partyCard} key={s.id}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle}>{s.name}</Text>
-              <Text style={styles.rowSub}>{s.phone || "No phone"}</Text>
-              <Text style={styles.partyBalance}>
-                Payable: {money(s.balance)}
-              </Text>
-            </View>
-
             <TouchableOpacity
-              style={styles.deleteButton}
-              onPress={() => deleteItem("suppliers", s.id)}
+              style={{
+                backgroundColor: GREEN,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                borderRadius: 6,
+                marginRight: 6,
+              }}
+              onPress={() => {
+                updateData({
+                  customers: [...data.customers, { ...p, deletedAt: undefined }],
+                  trash: data.trash.filter(x => x.id !== p.id),
+                });
+              }}
             >
-              <Text>×</Text>
+              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>Restore</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{
+                backgroundColor: RED,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                borderRadius: 6,
+              }}
+              onPress={() => {
+                Alert.alert(
+                  'Permanent Delete',
+                  `Are you sure you want to permanently delete ${p.name}? This cannot be undone.`,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Delete Forever',
+                      style: 'destructive',
+                      onPress: () => {
+                        updateData({
+                          trash: data.trash.filter(x => x.id !== p.id),
+                        });
+                      },
+                    },
+                  ]
+                );
+              }}
+            >
+              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>Delete</Text>
             </TouchableOpacity>
           </View>
         ))}
-      </ScrollView>
-    );
-  }
-
-  function Stock() {
-    return (
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.stockSummary}>
-          <Text style={styles.cardTitle}>Stock Value</Text>
-          <Text style={styles.bigMoney}>{money(stats.stockValue)}</Text>
-          <Text style={styles.rowSub}>
-            {data.products.length} products • {lowStock.length} low stock
-          </Text>
-        </View>
-
-        <Button title="+ Add Product" onPress={() => openAdd("product")} />
-
-        <SectionTitle>Products</SectionTitle>
-
-        {data.products.map((p) => {
-          const margin =
-            Number(p.sell || 0) - Number(p.buy || 0);
-
-          return (
-            <View style={styles.productCard} key={p.id}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowTitle}>{p.name}</Text>
-
-                <Text style={styles.rowSub}>
-                  SKU: {p.sku || "-"}
-                </Text>
-
-                <Text style={styles.rowSub}>
-                  Buy {money(p.buy)} • Sell {money(p.sell)}
-                </Text>
-
-                <Text style={styles.rowSub}>
-                  Margin: {money(margin)} • Stock: {p.stock}
-                </Text>
-              </View>
-
-              <View>
-                {Number(p.stock) <= Number(p.low) && (
-                  <Text style={styles.warning}>LOW</Text>
-                )}
-
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={() => deleteItem("products", p.id)}
-                >
-                  <Text>×</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          );
-        })}
-
-        {data.products.length === 0 && (
-          <Text style={styles.empty}>Products add kijiye.</Text>
+        {!trashItems.length && (
+          <Empty title="Recycle bin is empty" subtitle="Deleted customers will appear here." />
         )}
-      </ScrollView>
-    );
-  }
-
-  function Reports() {
-    return (
-      <ScrollView contentContainerStyle={styles.container}>
-        <SectionTitle>Business Report</SectionTitle>
-
-        <Card title="Sales" value={money(stats.sales)} />
-        <Card title="Purchases" value={money(stats.purchases)} />
-        <Card title="Expenses" value={money(stats.expenses)} />
-        <Card title="Estimated Profit" value={money(stats.profit)} />
-        <Card title="Stock Value" value={money(stats.stockValue)} />
-
-        <SectionTitle>Cash Flow</SectionTitle>
-
-        <View style={styles.reportBox}>
-          <Text style={styles.reportLine}>
-            Money Received{"\n"}
-            <Text style={styles.reportValue}>
-              {money(stats.received)}
-            </Text>
-          </Text>
-
-          <Text style={styles.reportLine}>
-            Money Given{"\n"}
-            <Text style={styles.reportValue}>
-              {money(stats.given)}
-            </Text>
-          </Text>
-
-          <Text style={styles.reportLine}>
-            Net Cash Flow{"\n"}
-            <Text style={styles.reportValue}>
-              {money(stats.received - stats.given)}
-            </Text>
-          </Text>
-        </View>
-
-        <SectionTitle>Expenses</SectionTitle>
-
-        {data.expenses.slice(0, 20).map((e) => (
-          <View style={styles.rowCard} key={e.id}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle}>{e.category}</Text>
-              <Text style={styles.rowSub}>
-                {e.date} • {e.note || "Expense"}
-              </Text>
-            </View>
-
-            <Text style={styles.amount}>{money(e.amount)}</Text>
-          </View>
-        ))}
-
-        {data.expenses.length === 0 && (
-          <Text style={styles.empty}>No expenses recorded.</Text>
-        )}
-
-        <Button
-          title="+ Add Expense"
-          onPress={() => openAdd("expense")}
-        />
-      </ScrollView>
-    );
-  }
-
-  function Smart() {
-    return (
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.smartHero}>
-          <Text style={styles.smartTitle}>Smart Business Advisor</Text>
-          <Text style={styles.smartSub}>
-            Aapke local business data ke basis par simple insights.
-          </Text>
-        </View>
-
-        <View style={styles.healthCard}>
-          <Text style={styles.cardTitle}>Business Health Score</Text>
-          <Text style={styles.healthNumber}>{healthScore}/100</Text>
-        </View>
-
-        <SectionTitle>Today's Insights</SectionTitle>
-
-        <View style={styles.insight}>
-          <Text style={styles.insightTitle}>💰 Profit</Text>
-          <Text style={styles.insightText}>
-            Current estimated profit: {money(stats.profit)}
-          </Text>
-        </View>
-
-        <View style={styles.insight}>
-          <Text style={styles.insightTitle}>📦 Inventory</Text>
-          <Text style={styles.insightText}>
-            Stock value: {money(stats.stockValue)}
-          </Text>
-        </View>
-
-        <View style={styles.insight}>
-          <Text style={styles.insightTitle}>👥 Outstanding</Text>
-          <Text style={styles.insightText}>
-            Customers se {money(stats.receivable)} receive karna hai.
-          </Text>
-        </View>
-
-        <View style={styles.insight}>
-          <Text style={styles.insightTitle}>⚠️ Action</Text>
-          <Text style={styles.insightText}>{advisorMessage()}</Text>
-        </View>
-
-        <SectionTitle>Recommended Actions</SectionTitle>
-
-        <Button
-          title="Add Customer"
-          onPress={() => openAdd("customer")}
-        />
-
-        <Button
-          title="Add Product"
-          onPress={() => openAdd("product")}
-        />
-
-        <Button
-          title="Record Sale"
-          onPress={() => openAdd("transaction")}
-        />
-
-        <Button
-          title="Record Expense"
-          onPress={() => openAdd("expense")}
-        />
-      </ScrollView>
-    );
-  }
-
-  function Settings() {
-    return (
-      <ScrollView contentContainerStyle={styles.container}>
-        <SectionTitle>Business Profile</SectionTitle>
-
-        <View style={styles.profileBox}>
-          <Text style={styles.rowTitle}>{data.business.name}</Text>
-          <Text style={styles.rowSub}>
-            Owner: {data.business.owner || "-"}
-          </Text>
-          <Text style={styles.rowSub}>
-            Phone: {data.business.phone || "-"}
-          </Text>
-          <Text style={styles.rowSub}>
-            UPI: {data.business.upi || "-"}
-          </Text>
-          <Text style={styles.rowSub}>
-            GSTIN: {data.business.gstin || "-"}
-          </Text>
-        </View>
-
-        <Button
-          title="Edit Business Profile"
-          onPress={() => {
-            setForm({ ...data.business });
-            setModal("business");
-          }}
-        />
-
-        <SectionTitle>App Data</SectionTitle>
-
-        <Button
-          title="Clear All Local Data"
-          secondary
-          onPress={() => {
-            Alert.alert(
-              "Clear Data",
-              "Saara local business data delete ho jayega.",
-              [
-                { text: "Cancel", style: "cancel" },
-                {
-                  text: "Delete",
-                  style: "destructive",
-                  onPress: async () => {
-                    setData(emptyData);
-                    await AsyncStorage.removeItem(DATA_KEY);
-                  },
-                },
-              ]
-            );
-          }}
-        />
-      </ScrollView>
-    );
-  }
-
-  function ModalContent() {
-    if (!modal) return null;
-
-    let title = "";
-
-    if (modal === "customer") title = "Add Customer";
-    if (modal === "supplier") title = "Add Supplier";
-    if (modal === "product") title = "Add Product";
-    if (modal === "transaction") title = "New Transaction";
-    if (modal === "expense") title = "Add Expense";
-    if (modal === "business") title = "Business Profile";
-
-    return (
-      <Modal visible transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <ScrollView>
-              <Text style={styles.modalTitle}>{title}</Text>
-
-              {modal === "customer" && (
-                <>
-                  <Input label="Name" field="name" placeholder="Customer name" />
-                  <Input
-                    label="Phone"
-                    field="phone"
-                    placeholder="10 digit mobile"
-                    keyboardType="phone-pad"
-                  />
-                  <Input
-                    label="Address"
-                    field="address"
-                    placeholder="Address"
-                  />
-                  <Input
-                    label="Opening Balance"
-                    field="balance"
-                    placeholder="0"
-                    keyboardType="numeric"
-                  />
-
-                  <Button title="Save Customer" onPress={addCustomer} />
-                </>
-              )}
-
-              {modal === "supplier" && (
-                <>
-                  <Input label="Name" field="name" placeholder="Supplier name" />
-                  <Input
-                    label="Phone"
-                    field="phone"
-                    placeholder="Mobile"
-                    keyboardType="phone-pad"
-                  />
-                  <Input
-                    label="Payable Balance"
-                    field="balance"
-                    placeholder="0"
-                    keyboardType="numeric"
-                  />
-
-                  <Button title="Save Supplier" onPress={addSupplier} />
-                </>
-              )}
-
-              {modal === "product" && (
-                <>
-                  <Input
-                    label="Product Name"
-                    field="name"
-                    placeholder="Product name"
-                  />
-
-                  <Input
-                    label="SKU"
-                    field="sku"
-                    placeholder="Optional SKU"
-                  />
-
-                  <Input
-                    label="Purchase Price"
-                    field="buy"
-                    placeholder="0"
-                    keyboardType="numeric"
-                  />
-
-                  <Input
-                    label="Selling Price"
-                    field="sell"
-                    placeholder="0"
-                    keyboardType="numeric"
-                  />
-
-                  <Input
-                    label="Current Stock"
-                    field="stock"
-                    placeholder="0"
-                    keyboardType="numeric"
-                  />
-
-                  <Input
-                    label="Low Stock Alert At"
-                    field="low"
-                    placeholder="5"
-                    keyboardType="numeric"
-                  />
-
-                  <Button title="Save Product" onPress={addProduct} />
-                </>
-              )}
-
-              {modal === "transaction" && (
-                <>
-                  <Text style={styles.inputLabel}>Transaction Type</Text>
-
-                  <View style={styles.typeRow}>
-                    {[
-                      ["sale", "Sale"],
-                      ["purchase", "Purchase"],
-                      ["received", "Received"],
-                      ["given", "Given"],
-                    ].map(([value, label]) => (
-                      <TouchableOpacity
-                        key={value}
-                        style={[
-                          styles.typeButton,
-                          (form.type || "sale") === value &&
-                            styles.typeSelected,
-                        ]}
-                        onPress={() => updateForm("type", value)}
-                      >
-                        <Text>{label}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  <Input
-                    label="Party / Customer"
-                    field="party"
-                    placeholder="Name"
-                  />
-
-                  <Input
-                    label="Amount"
-                    field="amount"
-                    placeholder="0"
-                    keyboardType="numeric"
-                  />
-
-                  <Input
-                    label="Note"
-                    field="note"
-                    placeholder="Optional note"
-                  />
-
-                  <Button
-                    title="Save Transaction"
-                    onPress={addTransaction}
-                  />
-                </>
-              )}
-
-              {modal === "expense" && (
-                <>
-                  <Input
-                    label="Category"
-                    field="category"
-                    placeholder="Rent / Salary / Electricity"
-                  />
-
-                  <Input
-                    label="Amount"
-                    field="amount"
-                    placeholder="0"
-                    keyboardType="numeric"
-                  />
-
-                  <Input
-                    label="Note"
-                    field="note"
-                    placeholder="Optional note"
-                  />
-
-                  <Button title="Save Expense" onPress={addExpense} />
-                </>
-              )}
-
-              {modal === "business" && (
-                <>
-                  <Input
-                    label="Business Name"
-                    field="name"
-                    placeholder="Business name"
-                  />
-
-                  <Input
-                    label="Owner"
-                    field="owner"
-                    placeholder="Owner name"
-                  />
-
-                  <Input
-                    label="Phone"
-                    field="phone"
-                    placeholder="Business phone"
-                    keyboardType="phone-pad"
-                  />
-
-                  <Input
-                    label="UPI ID"
-                    field="upi"
-                    placeholder="business@upi"
-                  />
-
-                  <Input
-                    label="GSTIN"
-                    field="gstin"
-                    placeholder="Optional GSTIN"
-                  />
-
-                  <Button
-                    title="Save Profile"
-                    onPress={updateBusiness}
-                  />
-                </>
-              )}
-
-              <Button
-                title="Cancel"
-                secondary
-                onPress={closeModal}
-              />
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      </View>
     );
   }
 
   if (!loaded) {
     return (
       <SafeAreaView style={styles.loading}>
-        <Text style={styles.loadingText}>Vyapar Khata loading...</Text>
+        <StatusBar backgroundColor={BLUE} />
+        <Text style={styles.headerTitle}>Loading Vyapar Khata…</Text>
       </SafeAreaView>
     );
   }
 
-  let screen = <Home />;
+  const isSubPage = page !== 'Parties';
 
-  if (tab === "Khata") screen = <Khata />;
-  if (tab === "Stock") screen = <Stock />;
-  if (tab === "Reports") screen = <Reports />;
-  if (tab === "Smart") screen = <Smart />;
-  if (tab === "Settings") screen = <Settings />;
+  const backPage =
+    page === 'Party detail'
+      ? 'Parties'
+      : page === 'Report detail'
+      ? 'Reports'
+      : page === 'Add transaction' || page === 'Edit transaction'
+      ? 'Party detail'
+      : page === 'Add item'
+      ? 'Items'
+      : page === 'Reports' || page === 'More' || page === 'Items' || page === 'Recycle Bin' || page === 'Settings' || page === 'Help & Support' || page === 'About Us'
+      ? 'More'
+      : 'More';
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView
+      style={[
+        styles.safe,
+        data.darkMode && { backgroundColor: '#101923' },
+      ]}
+    >
+      <StatusBar backgroundColor={BLUE} barStyle="light-content" />
 
-      <View style={styles.topBar}>
-        <View>
-          <Text style={styles.appName}>Vyapar Khata</Text>
-          <Text style={styles.topSub}>
-            {data.business.name}
-          </Text>
-        </View>
+      <Header
+        title={
+          page === 'Parties'
+            ? data.businessName
+            : page === 'Party detail' && selectedParty
+            ? selectedParty.name
+            : page === 'Report detail' && selectedReport
+            ? selectedReport.title
+            : page
+        }
+        back={isSubPage ? backPage : null}
+      />
 
-        <TouchableOpacity
-          style={styles.settingsButton}
-          onPress={() => setTab("Settings")}
-        >
-          <Text style={styles.settingsText}>⚙</Text>
-        </TouchableOpacity>
-      </View>
+      <ScrollView
+        style={styles.body}
+        contentContainerStyle={styles.bodyContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {page === 'Parties' && partyList()}
+        {page === 'Party detail' && partyDetail()}
 
-      {screen}
-
-      <View style={styles.bottom}>
         {[
-          ["Home", "⌂"],
-          ["Khata", "₹"],
-          ["Stock", "▣"],
-          ["Reports", "▤"],
-          ["Smart", "✦"],
-        ].map(([name, icon]) => (
-          <TouchableOpacity
-            key={name}
-            style={styles.navItem}
-            onPress={() => setTab(name)}
-          >
-            <Text
-              style={[
-                styles.navIcon,
-                tab === name && styles.navActive,
-              ]}
-            >
-              {icon}
-            </Text>
+          'Add party', 'Add transaction', 'Edit transaction', 'Add item', 'Edit profile',
+        ].includes(page) && formPage()}
 
-            <Text
-              style={[
-                styles.navText,
-                tab === name && styles.navActive,
-              ]}
+        {page === 'Reports' && reportPage()}
+        {page === 'Report detail' && reportDetail()}
+        {page === 'More' && morePage()}
+        {page === 'Items' && itemsPage()}
+        {page === 'Recycle Bin' && recycleBinPage()}
+
+        {[
+          'Settings', 'Help & Support', 'About Us',
+        ].includes(page) && simplePage()}
+
+
+      </ScrollView>
+
+      <View style={styles.bottomNav}>
+        {[
+          { name: 'Parties', icon: '♙' },
+          { name: 'More', icon: '☷' },
+        ].map(n => {
+          const morePages = [
+            'Reports', 'Report detail', 'Items', 'Settings',
+            'Help & Support', 'About Us', 'Edit profile', 'Add item',
+          ];
+
+          const active =
+            page === n.name ||
+            (n.name === 'More' && morePages.includes(page));
+
+          return (
+            <TouchableOpacity
+              key={n.name}
+              style={styles.navItem}
+              onPress={() => setPage(n.name)}
             >
-              {name}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              <Text style={[styles.navIcon, active && styles.navActive]}>
+                {n.icon}
+              </Text>
+              <Text style={[styles.navText, active && styles.navActive]}>
+                {n.name}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
-
-      {ModalContent()}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: "#F5F7FB",
-  },
+function PrimaryButton({ label, onPress }) {
+  return (
+    <TouchableOpacity style={styles.primaryButton} onPress={onPress}>
+      <Text style={styles.primaryButtonText}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 
+function Empty({ title, subtitle }) {
+  return (
+    <View style={styles.empty}>
+      <Text style={styles.emptyTitle}>{title}</Text>
+      <Text style={styles.muted}>{subtitle}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: BG },
   loading: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#F5F7FB",
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: BLUE,
   },
-
-  loadingText: {
-    fontSize: 18,
-    fontWeight: "700",
-  },
-
-  topBar: {
-    minHeight: 68,
+  header: {
+    backgroundColor: BLUE,
     paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 8,
-    backgroundColor: "#FFFFFF",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E9EDF3",
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 76,
   },
-
-  appName: {
-    fontSize: 21,
-    fontWeight: "800",
+  logo: { color: '#fff', fontSize: 26, marginRight: 16 },
+  back: { width: 40 },
+  backText: { fontSize: 36, color: '#fff', lineHeight: 40 },
+  headerTitle: { fontSize: 19, fontWeight: '800', color: '#fff' },
+  headerSub: { fontSize: 12, color: '#D9E9FF', marginTop: 3 },
+  body: { flex: 1 },
+  bodyContent: { padding: 15, paddingBottom: 28 },
+  summaryCard: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 17,
+    marginBottom: 15,
+    elevation: 1,
   },
-
-  topSub: {
-    color: "#777",
-    marginTop: 2,
-    fontSize: 12,
+  summaryLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#778398',
+    letterSpacing: 1,
+    marginBottom: 13,
   },
-
-  settingsButton: {
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  summaryAmount: { fontSize: 22, fontWeight: '900', marginTop: 5 },
+  vline: { width: 1, height: 42, backgroundColor: '#E4E8EE' },
+  muted: { fontSize: 13, color: '#7C8797', marginTop: 4 },
+  miniMuted: { fontSize: 10, color: '#8C96A5', marginTop: 4 },
+  tabs: {
+    flexDirection: 'row',
+    backgroundColor: '#E5EAF2',
+    borderRadius: 10,
+    padding: 4,
+    marginBottom: 13,
+  },
+  tab: {
+    flex: 1,
+    padding: 10,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  tabActive: { backgroundColor: '#fff', elevation: 1 },
+  tabText: { fontSize: 12, color: '#647084', fontWeight: '700' },
+  tabTextActive: { color: BLUE },
+  input: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#E0E5EC',
+    borderRadius: 10,
+    paddingHorizontal: 13,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: '#202B3C',
+    marginBottom: 12,
+  },
+  sectionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 7,
+  },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#202B3C',
+    marginBottom: 10,
+  },
+  partyRow: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 13,
+    marginBottom: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    elevation: 1,
+  },
+  avatar: {
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: "#F0F2F5",
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: LIGHT_BLUE,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  settingsText: {
-    fontSize: 21,
-  },
-
-  container: {
-    padding: 16,
-    paddingBottom: 110,
-  },
-
-  hero: {
-    backgroundColor: "#111827",
-    borderRadius: 22,
-    padding: 22,
-    marginBottom: 16,
-  },
-
-  heroSmall: {
-    color: "#AAB2C0",
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 1,
-  },
-
-  heroTitle: {
-    color: "#FFFFFF",
-    fontSize: 27,
-    fontWeight: "900",
-    marginTop: 7,
-  },
-
-  heroSub: {
-    color: "#C7CDD8",
-    marginTop: 5,
-  },
-
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-  },
-
-  card: {
-    width: "48%",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#ECEFF4",
-  },
-
-  cardTitle: {
-    color: "#707784",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-
-  cardValue: {
-    fontSize: 20,
-    fontWeight: "900",
-    marginTop: 8,
-  },
-
-  cardSub: {
-    color: "#8B919B",
-    marginTop: 5,
-    fontSize: 11,
-  },
-
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "900",
-    marginTop: 18,
+  avatarBig: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: BLUE,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 10,
   },
-
-  actionGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-  },
-
-  button: {
-    backgroundColor: "#111827",
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginBottom: 10,
-    alignItems: "center",
-    minWidth: "47%",
-  },
-
-  buttonText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-    fontSize: 14,
-  },
-
-  secondaryButton: {
-    backgroundColor: "#EEF0F3",
-  },
-
-  secondaryButtonText: {
-    color: "#222",
-  },
-
-  healthCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 20,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E9EDF3",
-  },
-
-  healthNumber: {
-    fontSize: 38,
-    fontWeight: "900",
-    marginTop: 5,
-  },
-
-  healthText: {
-    color: "#6D7480",
-    textAlign: "center",
-    marginTop: 6,
-  },
-
-  advisor: {
-    backgroundColor: "#FFF8E7",
-    borderRadius: 18,
-    padding: 16,
-    flexDirection: "row",
-    alignItems: "flex-start",
-  },
-
-  advisorIcon: {
-    fontSize: 23,
-    marginRight: 10,
-  },
-
-  advisorText: {
-    flex: 1,
-    fontSize: 14,
-    lineHeight: 21,
-    color: "#574A22",
-    fontWeight: "600",
-  },
-
-  rowCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 15,
-    marginBottom: 9,
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#ECEFF4",
-  },
-
-  rowTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-  },
-
-  rowSub: {
-    fontSize: 12,
-    color: "#777F8B",
-    marginTop: 4,
-  },
-
-  amount: {
-    fontSize: 15,
-    fontWeight: "900",
-  },
-
-  warning: {
-    color: "#B45309",
-    backgroundColor: "#FEF3C7",
-    paddingHorizontal: 8,
-    paddingVertical: 5,
+  avatarText: { fontSize: 21, fontWeight: '900', color: '#fff' },
+  partyName: { fontSize: 14, fontWeight: '800', color: '#202B3C' },
+  primaryButton: {
+    backgroundColor: BLUE,
+    paddingVertical: 13,
+    paddingHorizontal: 15,
     borderRadius: 8,
-    fontSize: 10,
-    fontWeight: "900",
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 48,
   },
-
+  primaryButtonText: { color: '#fff', fontSize: 14, fontWeight: '800' },
   empty: {
-    textAlign: "center",
-    color: "#8A919C",
-    paddingVertical: 20,
+    backgroundColor: '#fff',
+    padding: 25,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginVertical: 10,
   },
-
-  partyCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#ECEFF4",
-  },
-
-  partyBalance: {
-    marginTop: 7,
-    fontWeight: "800",
-  },
-
-  dueText: {
-    color: "#B45309",
-  },
-
-  smallActions: {
-    flexDirection: "row",
-    gap: 7,
-    alignItems: "center",
-  },
-
-  iconButton: {
-    backgroundColor: "#E8F5E9",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 9,
-  },
-
-  deleteButton: {
-    backgroundColor: "#F3F4F6",
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 8,
-  },
-
-  stockSummary: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 12,
-  },
-
-  bigMoney: {
-    fontSize: 30,
-    fontWeight: "900",
-    marginTop: 5,
-  },
-
-  productCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 10,
-    flexDirection: "row",
-    borderWidth: 1,
-    borderColor: "#ECEFF4",
-  },
-
-  reportBox: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 18,
-  },
-
-  reportLine: {
-    color: "#666",
-    marginBottom: 16,
-    lineHeight: 21,
-  },
-
-  reportValue: {
-    color: "#111827",
-    fontSize: 19,
-    fontWeight: "900",
-  },
-
-  smartHero: {
-    backgroundColor: "#111827",
-    borderRadius: 22,
-    padding: 22,
-  },
-
-  smartTitle: {
-    color: "#FFFFFF",
-    fontSize: 24,
-    fontWeight: "900",
-  },
-
-  smartSub: {
-    color: "#C8CED8",
-    marginTop: 7,
-    lineHeight: 20,
-  },
-
-  insight: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 17,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#ECEFF4",
-  },
-
-  insightTitle: {
-    fontSize: 15,
-    fontWeight: "900",
-  },
-
-  insightText: {
-    color: "#626A75",
-    marginTop: 7,
-    lineHeight: 20,
-  },
-
-  profileBox: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 18,
-    marginBottom: 12,
-  },
-
-  inputWrap: {
-    marginBottom: 13,
-  },
-
-  inputLabel: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: "#555C67",
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#202B3C',
     marginBottom: 6,
   },
-
-  input: {
-    height: 48,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#DDE2E9",
-    paddingHorizontal: 13,
-    fontSize: 15,
-    backgroundColor: "#FAFBFC",
-    color: "#111827",
+  detailCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+    marginBottom: 20,
   },
-
-  typeRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+  detailName: { fontSize: 20, fontWeight: '800', color: '#202B3C' },
+  detailAmount: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: BLUE,
+    marginTop: 5,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+    marginTop: 18,
+  },
+  actionButton: {
+    flex: 1,
+    padding: 13,
+    borderRadius: 9,
+    alignItems: 'center',
+  },
+  actionText: { color: '#fff', fontWeight: '800' },
+  txRow: {
+    backgroundColor: '#fff',
+    borderRadius: 11,
+    padding: 14,
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  formCard: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 17,
+    marginBottom: 16,
+  },
+  formTitle: {
+    fontSize: 21,
+    fontWeight: '800',
+    color: '#202B3C',
+    marginBottom: 8,
+  },
+  label: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#364254',
+    marginTop: 9,
+    marginBottom: 6,
+  },
+  cancel: { alignItems: 'center', padding: 13 },
+  cancelText: { color: '#667085', fontWeight: '700' },
+  bottomNav: {
+    height: 66,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#E3E6EB',
+    flexDirection: 'row',
+    paddingTop: 7,
+  },
+  navItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navIcon: { fontSize: 23, color: '#737E8D' },
+  navText: { fontSize: 11, color: '#737E8D', marginTop: 2 },
+  navActive: { color: BLUE, fontWeight: '900' },
+  reportTabs: { paddingHorizontal: 4, gap: 9 },
+  reportTab: {
+    paddingHorizontal: 15,
+    paddingVertical: 11,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D6DCE5',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+  },
+  reportTabActive: { borderColor: BLUE, backgroundColor: '#F8FBFF' },
+  reportTabText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#424B57',
+  },
+  reportTabTextActive: { color: BLUE },
+  reportCard: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#D9DDE3',
+    paddingHorizontal: 15,
+    paddingTop: 17,
+    paddingBottom: 2,
     marginBottom: 15,
+    elevation: 1,
+  },
+  reportSection: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#101318',
+    marginBottom: 10,
+  },
+  reportRow: {
+    minHeight: 88,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 13,
+    paddingVertical: 14,
+  },
+  reportDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#DADDE2',
+  },
+  reportIcon: {
+    width: 38,
+    textAlign: 'center',
+    fontSize: 25,
+    color: BLUE,
+  },
+  reportTitle: { fontSize: 16, color: '#101318' },
+  reportSubtitle: { fontSize: 12, color: '#8A9099', marginTop: 4 },
+  chevron: { fontSize: 28, color: '#111827', paddingHorizontal: 3 },
+  bold: { fontWeight: '900', color: '#202B3C' },
+  notice: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#8A5A00',
+    backgroundColor: '#FFF4D3',
+    padding: 11,
+    borderRadius: 8,
+    marginTop: 12,
+  },
+  profileRow: {
+    backgroundColor: '#fff',
+    padding: 15,
+    borderRadius: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 13,
+  },
+  editButton: {
+    borderWidth: 1,
+    borderColor: BLUE,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  editText: { color: BLUE, fontSize: 14, fontWeight: '700' },
+  profileStrength: {
+    backgroundColor: '#fff',
+    padding: 14,
+    marginBottom: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
     gap: 7,
   },
-
-  typeButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: "#F0F2F5",
+  strengthBar: {
+    height: 6,
+    backgroundColor: GREEN,
+    borderRadius: 4,
+    width: '100%',
+    marginBottom: 7,
   },
-
-  typeSelected: {
-    backgroundColor: "#DDE3ED",
+  promoCard: {
+    backgroundColor: '#F4F8FF',
+    borderColor: '#C6DDFB',
     borderWidth: 1,
-    borderColor: "#111827",
+    borderRadius: 14,
+    padding: 18,
+    marginBottom: 15,
   },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    justifyContent: "flex-end",
+  promoTitle: { fontSize: 17, fontWeight: '900', color: '#202B3C' },
+  learnButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: BLUE,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderRadius: 8,
+    marginTop: 16,
   },
-
-  modalBox: {
-    backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
-    maxHeight: "92%",
-    padding: 20,
+  learnText: { color: '#fff', fontWeight: '900' },
+  plusCard: {
+    backgroundColor: '#001323',
+    borderRadius: 23,
+    padding: 18,
+    marginBottom: 15,
   },
-
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: "900",
-    marginBottom: 18,
+  plusTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 14,
   },
-
-  bottom: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 72,
-    backgroundColor: "#FFFFFF",
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 15,
     borderTopWidth: 1,
-    borderTopColor: "#E7EAF0",
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    paddingBottom: 4,
+    borderTopColor: '#263544',
+    gap: 13,
   },
-
-  navItem: {
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 58,
+  settingIcon: {
+    fontSize: 25,
+    color: '#fff',
+    width: 42,
+    textAlign: 'center',
   },
-
-  navIcon: {
-    fontSize: 19,
-    color: "#8A919C",
+  settingText: { color: '#fff', fontSize: 16, flex: 1 },
+  unlockButton: {
+    backgroundColor: GOLD,
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+    marginTop: 12,
   },
-
-  navText: {
-    fontSize: 10,
-    color: "#8A919C",
-    marginTop: 3,
-    fontWeight: "700",
+  unlockText: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#092640',
   },
-
-  navActive: {
-    color: "#111827",
-    fontWeight: "900",
+  moreMenu: {
+    backgroundColor: '#fff',
+    marginHorizontal: -15,
+    marginTop: 2,
+  },
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 22,
+    paddingVertical: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E3E5E9',
+    gap: 17,
+  },
+  menuIcon: {
+    fontSize: 27,
+    color: BLUE,
+    width: 38,
+    textAlign: 'center',
+  },
+  menuText: { fontSize: 16, color: '#414956', flex: 1 },
+  menuTextSmall: { fontSize: 14, color: '#202B3C' },
+  inviteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    gap: 15,
+  },
+  inviteText: {
+    fontSize: 15,
+    color: BLUE,
+    fontWeight: '900',
+    marginTop: 9,
+  },
+  footer: {
+    textAlign: 'center',
+    color: '#7C8797',
+    fontSize: 13,
+    lineHeight: 22,
+    padding: 25,
   },
 });

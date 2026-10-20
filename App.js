@@ -1,3 +1,4 @@
+import * as Contacts from 'expo-contacts';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert, SafeAreaView, StatusBar, View, Text, TextInput,

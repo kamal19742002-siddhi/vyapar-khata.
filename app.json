@@ -1,34 +1,17 @@
-
-{
-  "expo": {
-    "name": "Vyapar Khata Book",
-    "slug": "vyapar-khata",
-    "version": "1.0.2",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0f172a"
-    },
-    "android": {
-      "package": "com.vyapar.khatabook.free",
-      "versionCode": 7,
-      "compileSdkVersion": 36,
-      "targetSdkVersion": 36,
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0f172a"
+"plugins": [
+  [
+    "expo-build-properties",
+    {
+      "android": {
+        "compileSdkVersion": 36,
+        "targetSdkVersion": 36
       }
-    },
-    "plugins": [
-      [
-        "expo-contacts",
-        {
-          "contactsPermission": "Allow Vyapar Khata to access your contacts to quickly add customer profiles."
-        }
-      ]
-    ]
-  }
-}
+    }
+  ],
+  [
+    "expo-contacts",
+    {
+      "contactsPermission": "Allow Vyapar Khata to access your contacts to quickly add customer profiles."
+    }
+  ]
+]

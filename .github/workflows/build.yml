@@ -198,12 +198,16 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         shell: bash
         run: |
-          if [ -z "$KEYSTORE_PASSWORD" ] || \
-             [ -z "$KEY_ALIAS" ] || \
-             [ -z "$KEY_PASSWORD" ]; then
-            echo "ERROR: Signing secrets are missing."
+          set -euo pipefail
+
+          test -s android/app/upload-keystore.jks || {
+            echo "ERROR: Upload keystore is missing."
             exit 1
-          fi
+          }
+
+          test -n "$KEYSTORE_PASSWORD"
+          test -n "$KEY_ALIAS"
+          test -n "$KEY_PASSWORD"
 
           python3 - <<'PY'
           from pathlib import Path
@@ -211,22 +215,40 @@ jobs:
           import sys
 
           path = Path("android/app/build.gradle")
-          if not path.exists():
-              sys.exit("ERROR: android/app/build.gradle not found")
-
           text = path.read_text()
-          text = re.sub(
-              r'(?s)\s*// VYAPAR_SIGNING_START.*?'
-              r'// VYAPAR_SIGNING_END\s*',
-              '\n',
-              text
-          )
 
-          android_pos = text.find("android {")
-          build_types_pos = text.find("buildTypes {", android_pos)
+          if "signingConfigs {" not in text:
+              sys.exit("ERROR: signingConfigs block not found.")
 
-          signing_block = '''
-              // VYAPAR_SIGNING_START
+          if "buildTypes {" not in text:
+              sys.exit("ERROR: buildTypes block not found.")
+
+          start = text.find("buildTypes {")
+          release = re.search(r'\brelease\s*\{', text[start:])
+          if not release:
+              sys.exit("ERROR: release build type not found.")
+
+          release_start = start + release.start()
+          opening = text.find("{", release_start)
+          depth = 0
+          end = -1
+
+          for i in range(opening, len(text)):
+              if text[i] == "{":
+                  depth += 1
+              elif text[i] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      end = i
+                      break
+
+          if end < 0:
+              sys.exit("ERROR: release block is malformed.")
+
+          block = text[release_start:end + 1]
+
+          if "vyaparRelease" not in text:
+              signing = """
               signingConfigs {
                   vyaparRelease {
                       storeFile file("upload-keystore.jks")
@@ -235,41 +257,47 @@ jobs:
                       keyPassword System.getenv("KEY_PASSWORD")
                   }
               }
-              // VYAPAR_SIGNING_END
-          '''
+              """
+              text = text[:start] + signing + text[start:]
+              start = text.find("buildTypes {")
+              release = re.search(r'\brelease\s*\{', text[start:])
+              release_start = start + release.start()
+              opening = text.find("{", release_start)
+              depth = 0
+              for i in range(opening, len(text)):
+                  if text[i] == "{":
+                      depth += 1
+                  elif text[i] == "}":
+                      depth -= 1
+                      if depth == 0:
+                          end = i
+                          break
+              block = text[release_start:end + 1]
 
-          text = (
-              text[:build_types_pos]
-              + signing_block
-              + text[build_types_pos:]
+          block = re.sub(
+              r'(?m)^\s*signingConfig\s+signingConfigs\.\w+\s*$',
+              '            signingConfig signingConfigs.vyaparRelease',
+              block
           )
 
-          build_types_pos = text.find("buildTypes {", android_pos)
-          release_pos = text.find("release {", build_types_pos)
-
-          depth = 0
-          release_end = None
-          for i in range(release_pos, len(text)):
-              if text[i] == "{":
-                  depth += 1
-              elif text[i] == "}":
-                  depth -= 1
-                  if depth == 0:
-                      release_end = i
-                      break
-
-          release_content = text[release_pos:release_end]
-          if "signingConfig" not in release_content:
-              insert_at = release_pos + len("release {")
-              text = (
-                  text[:insert_at]
-                  + "\n            signingConfig signingConfigs.vyaparRelease"
-                  + text[insert_at:]
+          if "signingConfig signingConfigs.vyaparRelease" not in block:
+              block = block[:-1] + (
+                  "\n        signingConfig signingConfigs.vyaparRelease\n"
+                  "    }"
               )
 
+          text = text[:release_start] + block + text[end + 1:]
           path.write_text(text)
-          print("Release signing configuration added.")
+          print("Release signing configured.")
           PY
+
+          echo "Checking the certificate used by GitHub..."
+          keytool -list -v \
+            -keystore android/app/upload-keystore.jks \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -alias "$KEY_ALIAS" \
+            | grep -E "SHA1:|SHA256:"
+
 
       - name: Build Production Android App Bundle (AAB)
         shell: bash

@@ -1,18 +1,28 @@
-"plugins": [
-  [
-    "expo-build-properties",
-   "android": {
-  "package": "${PACKAGE_NAME}",
-  "versionCode": ${VERSION_CODE},
-  "compileSdkVersion": 36,
-  "targetSdkVersion": 36
-}
-    }
-  ],
-  [
-    "expo-contacts",
-    {
-      "contactsPermission": "Allow Vyapar Khata to access your contacts to quickly add customer profiles."
-    }
-  ]
-]
+      - name: Create app.json
+        shell: bash
+        run: |
+          cat > app.json <<EOF
+          {
+            "expo": {
+              "name": "Vyapar Khata",
+              "slug": "vyapar-khata",
+              "version": "2.0.0",
+              "orientation": "portrait",
+              "android": {
+                "package": "${PACKAGE_NAME}",
+                "versionCode": ${VERSION_CODE}
+              },
+              "plugins": [
+                [
+                  "expo-build-properties",
+                  {
+                    "android": {
+                      "compileSdkVersion": 36,
+                      "targetSdkVersion": 36
+                    }
+                  }
+                ]
+              ]
+            }
+          }
+          EOF

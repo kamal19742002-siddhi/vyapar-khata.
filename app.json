@@ -1,11 +1,12 @@
 "plugins": [
   [
     "expo-build-properties",
-    {
-      "android": {
-        "compileSdkVersion": 36,
-        "targetSdkVersion": 36
-      }
+   "android": {
+  "package": "${PACKAGE_NAME}",
+  "versionCode": ${VERSION_CODE},
+  "compileSdkVersion": 36,
+  "targetSdkVersion": 36
+}
     }
   ],
   [

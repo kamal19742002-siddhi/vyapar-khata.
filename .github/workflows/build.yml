@@ -345,6 +345,23 @@ jobs:
         shell: bash
         run: |
           keytool -list -v \
+      - name: Check Private Key Password
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -e
+          keytool -certreq \
+            -keystore android/app/upload-keystore.jks \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -alias "$KEY_ALIAS" \
+            -keypass "$KEY_PASSWORD" \
+            -file /tmp/vyapar-test.csr
+          echo "Private key password check passed."
+          rm -f /tmp/vyapar-test.csr
+          
             -keystore android/app/upload-keystore.jks \
             -storepass "$KEYSTORE_PASSWORD" \
             -alias "$KEY_ALIAS" \

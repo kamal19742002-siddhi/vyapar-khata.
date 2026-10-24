@@ -298,7 +298,14 @@ jobs:
             -alias "$KEY_ALIAS" \
             | grep -E "SHA1:|SHA256:"
 
-
+      - name: Verify Release Signing Configuration
+        shell: bash
+        run: |
+          echo "Checking release signing configuration..."
+          grep -n -A 12 -B 4 "signingConfigs" android/app/build.gradle
+          grep -n -A 15 "buildTypes" android/app/build.gradle
+          echo "Checking keystore file..."
+          ls -l android/app/upload-keystore.jks
       - name: Build Production Android App Bundle (AAB)
         shell: bash
         run: |

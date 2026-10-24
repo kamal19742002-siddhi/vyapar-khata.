@@ -109,6 +109,7 @@ jobs:
       - name: Expo Prebuild
         shell: bash
         run: |
+          npx expo install expo-build-properties
           npx expo prebuild \
             --platform android \
             --non-interactive \
@@ -116,6 +117,7 @@ jobs:
 
       - name: Fix Splash Resource
         shell: bash
+
         run: |
           mkdir -p android/app/src/main/res/values
 

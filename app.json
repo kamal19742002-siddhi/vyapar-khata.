@@ -1,4 +1,4 @@
-```json
+
 {
   "expo": {
     "name": "Vyapar Khata Book",
@@ -14,7 +14,7 @@
     },
     "android": {
       "package": "com.vyapar.khatabook.free",
-      "versionCode": 6,
+      "versionCode": 7,
       "compileSdkVersion": 36,
       "targetSdkVersion": 36,
       "adaptiveIcon": {
@@ -32,4 +32,3 @@
     ]
   }
 }
-```

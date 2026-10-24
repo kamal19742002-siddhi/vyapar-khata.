@@ -304,8 +304,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew bundleRelease --no-daemon
-
+          ./gradlew bundleRelease --no-daemon --stacktrace --info
       - name: Verify AAB File
         if: success()
         shell: bash
